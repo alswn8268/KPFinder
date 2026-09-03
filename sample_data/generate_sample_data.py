@@ -5,8 +5,9 @@
 비슷한 제목/내용의 v1, v2, final류 문서도 포함해 유사 문서 탐지 데모도 가능하다.
 
 사용법:
-    python sample_data/generate_sample_data.py [출력경로]
+    python sample_data/generate_sample_data.py [출력경로] [--force]
     (기본 출력경로: sample_data/messy_folder)
+    출력 폴더가 이미 있으면 기본적으로 삭제하지 않는다. 덮어쓰려면 --force를 붙인다.
 """
 
 import csv
@@ -82,9 +83,12 @@ def _write_docx(target_dir: str, filename: str, content: str) -> bool:
     return True
 
 
-def generate(output_dir: str, seed: int = 42) -> int:
+def generate(output_dir: str, seed: int = 42, force: bool = False) -> int:
     random.seed(seed)
     if os.path.exists(output_dir):
+        if not force:
+            print(f"이미 존재하는 폴더입니다: {output_dir} (덮어쓰려면 --force 옵션을 사용하세요)")
+            return 0
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
@@ -122,5 +126,7 @@ def generate(output_dir: str, seed: int = 42) -> int:
 
 
 if __name__ == "__main__":
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else OUTPUT_DEFAULT
-    generate(out_dir)
+    args = [a for a in sys.argv[1:] if a != "--force"]
+    force_flag = "--force" in sys.argv[1:]
+    out_dir = args[0] if args else OUTPUT_DEFAULT
+    generate(out_dir, force=force_flag)

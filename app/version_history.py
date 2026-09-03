@@ -57,3 +57,23 @@ def mark_restored(root: str, version_id: str) -> None:
         if v["version_id"] == version_id:
             v["restored"] = True
     _save_versions(root, versions)
+
+
+def can_restore(root: str, version_id: str) -> tuple[bool, str]:
+    """이 버전을 지금 되돌려도 안전한지 확인한다.
+
+    같은 폴더에서 이 버전보다 나중에 적용됐고 아직 되돌려지지 않은 버전이 있으면,
+    그 버전들의 이동 결과와 충돌할 수 있으므로 먼저 그것부터 되돌리도록 막는다.
+    """
+    versions = list_versions(root)
+    index_by_id = {v["version_id"]: i for i, v in enumerate(versions)}
+    if version_id not in index_by_id:
+        return False, "존재하지 않는 버전입니다."
+
+    target_index = index_by_id[version_id]
+    later_unrestored = [
+        v for i, v in enumerate(versions) if i > target_index and not v["restored"]
+    ]
+    if later_unrestored:
+        return False, "더 최근 버전을 먼저 되돌려야 합니다."
+    return True, ""

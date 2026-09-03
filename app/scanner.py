@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 
-SUPPORTED_TEXT_EXTS = {".txt", ".docx", ".xlsx", ".csv", ".pptx", ".pdf"}
+SUPPORTED_TEXT_EXTS = {".txt", ".docx", ".xlsx", ".csv", ".pptx", ".pdf", ".hwpx", ".hwp"}
 HASH_CHUNK_SIZE = 1024 * 1024
 
 

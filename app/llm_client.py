@@ -72,35 +72,83 @@ def summarize_text(text: str, model: str = DEFAULT_MODEL, max_chars: int = 2000)
     return chat(messages, model=model).strip()
 
 
-def propose_folder_structure(file_entries: list[dict], model: str = DEFAULT_MODEL) -> dict:
+def propose_folder_structure(
+    file_entries: list[dict],
+    model: str = DEFAULT_MODEL,
+    allowed_folders: list[str] | None = None,
+) -> dict:
     """파일별 요약을 바탕으로 새 폴더 구조와 파일별 이동 위치를 제안받는다.
 
-    반환값: {"categories": [...], "assignments": {"기존 상대경로": "새 경로"}, "notes": "..."}
+    allowed_folders를 주면 AI가 그 목록 안에서만 목적지를 고르도록 제약한다
+    (조직 표준 템플릿 밖의 임의 카테고리 생성을 막기 위함).
+
+    반환값: {"categories": [...],
+             "assignments": {"기존 상대경로": {"dst": "새경로", "reason": "...", "confidence": "높음|보통|낮음"}},
+             "notes": "..."}
     """
     file_list_text = "\n".join(
         f"- {e['relative_path']} | 확장자: {e['ext']} | 요약: {e['summary']}"
         for e in file_entries
     )
+    folder_constraint = ""
+    if allowed_folders:
+        folder_list_text = ", ".join(allowed_folders)
+        folder_constraint = (
+            "목적지 폴더는 반드시 다음 목록 중 하나로만 시작해야 한다(새 폴더명을 임의로 "
+            f"만들지 마라): {folder_list_text}. "
+        )
     messages = [
         {
             "role": "system",
             "content": (
                 "너는 회사 업무 폴더를 정리하는 보조원이다. "
                 "아래는 폴더 안 파일들의 경로와 요약이다. "
-                "내용과 문서 종류를 기준으로 논리적인 폴더 구조(카테고리)를 제안하고, "
-                "각 파일을 어느 새 폴더로 옮기면 좋을지 결정해라. "
-                "폴더 구조는 2단계(카테고리/파일명)를 넘지 않도록 하고, "
+                "내용과 문서 종류를 기준으로 각 파일을 어느 폴더로 옮기면 좋을지 결정해라. "
+                + folder_constraint
+                + "파일별로 분류 이유(reason)와 신뢰도(confidence: 높음/보통/낮음)도 함께 제시해라. "
+                "신뢰도는 파일명·내용·규칙이 모두 일치하면 '높음', 내용은 일치하지만 "
+                "직접적인 규칙이 없으면 '보통', 본문이 불완전하거나 여러 카테고리로 "
+                "해석될 수 있으면 '낮음'으로 판단해라. "
                 "반드시 JSON 객체 하나만 출력해라. 다른 설명 문장은 출력하지 마라. "
                 "JSON 형식: "
                 '{"categories": ["카테고리명", ...], '
-                '"assignments": {"기존 상대경로": "새카테고리/파일명"}, '
+                '"assignments": {"기존 상대경로": {"dst": "새카테고리/파일명", '
+                '"reason": "분류 이유", "confidence": "높음|보통|낮음"}}, '
                 '"notes": "제안에 대한 한두 문장 설명"}'
             ),
         },
         {"role": "user", "content": file_list_text},
     ]
     content = chat(messages, model=model, timeout=180)
-    return _parse_json_response(content)
+    raw = _parse_json_response(content)
+    raw["assignments"] = normalize_assignments(raw.get("assignments"))
+    return raw
+
+
+def normalize_assignments(raw_assignments) -> dict[str, dict]:
+    """AI 응답의 assignments를 {src: {"dst","reason","confidence"}} 형태로 통일한다.
+
+    모델이 형식을 지키지 않고 문자열만 반환하는 경우에도 대비한다.
+    """
+    normalized: dict[str, dict] = {}
+    for src, value in (raw_assignments or {}).items():
+        if isinstance(value, dict):
+            dst = value.get("dst") or value.get("path") or value.get("target") or ""
+            reason = value.get("reason", "")
+            confidence = value.get("confidence") or "보통"
+        elif isinstance(value, str):
+            dst, reason, confidence = value, "", "보통"
+        else:
+            continue
+        if confidence not in ("높음", "보통", "낮음"):
+            confidence = "보통"
+        normalized[src] = {
+            "dst": dst,
+            "reason": reason,
+            "confidence": confidence,
+            "source": "ai",
+        }
+    return normalized
 
 
 def _parse_json_response(content: str) -> dict:

@@ -37,3 +37,25 @@ def test_mark_restored_updates_only_target_version(tmp_path):
 
     restored = {v["version_id"]: v["restored"] for v in versions}
     assert restored == {"v1": True, "v2": False}
+
+
+def test_can_restore_blocked_when_later_version_unrestored(tmp_path):
+    root = str(tmp_path / "some_folder")
+    version_history.record_version(root, "log1.json", note="", files_moved=1)
+    version_history.record_version(root, "log2.json", note="", files_moved=2)
+
+    allowed, reason = version_history.can_restore(root, "v1")
+
+    assert allowed is False
+    assert reason
+
+
+def test_can_restore_allowed_for_most_recent_unrestored(tmp_path):
+    root = str(tmp_path / "some_folder")
+    version_history.record_version(root, "log1.json", note="", files_moved=1)
+    version_history.record_version(root, "log2.json", note="", files_moved=2)
+
+    allowed, reason = version_history.can_restore(root, "v2")
+
+    assert allowed is True
+    assert reason == ""

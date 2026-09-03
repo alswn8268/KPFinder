@@ -6,3 +6,4 @@ venv/
 sample_data/messy_folder/
 .pytest_cache/
 *.egg-info/
+.claude/

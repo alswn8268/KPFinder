@@ -1,12 +1,19 @@
-"""파일 요약 오케스트레이션(+캐싱)과 폴더 구조 제안."""
+"""파일 요약 오케스트레이션(+캐싱)과 폴더 구조 제안(규칙 우선 + AI 보조)."""
 
 import hashlib
 import json
 import os
 
-from app import llm_client
+from app import llm_client, path_safety, templates
 from app.scanner import FileEntry
-from app.text_extractor import ExtractionError, extract_text, is_supported
+from app.text_extractor import (
+    EncryptedDocumentError,
+    ExtractionError,
+    HwpParseError,
+    OcrNeededError,
+    extract_text,
+    is_supported,
+)
 
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".ai_folder_organizer")
 
@@ -16,6 +23,9 @@ _STATUS_LABELS = {
     "unsupported": "미지원 형식",
     "failed": "요약 불가",
     "pending": "대기",
+    "hwp": "파일명 기반 분류",
+    "encrypted": "암호화 문서",
+    "ocr_needed": "OCR 필요",
 }
 
 
@@ -54,7 +64,11 @@ def _cache_key(entry: FileEntry) -> str:
 def summarize_entries(
     entries: list[FileEntry], root: str, model: str, progress_cb=None
 ) -> None:
-    """각 FileEntry.summary / summary_status를 채운다. 캐시가 있으면 LLM 호출을 건너뛴다."""
+    """각 FileEntry.summary / summary_status를 채운다. 캐시가 있으면 LLM 호출을 건너뛴다.
+
+    .hwp처럼 본문 추출이 불가능한 형식은 LLM을 호출하지 않고 파일명/상위 폴더 기반의
+    안내 문구만 채운다. 암호화 문서, 이미지형 PDF는 각각 구분된 상태로 표시한다.
+    """
     cache = load_cache(root)
     total = len(entries)
     for i, entry in enumerate(entries, start=1):
@@ -75,6 +89,19 @@ def summarize_entries(
                 else:
                     entry.summary = llm_client.summarize_text(text, model=model)
                     entry.summary_status = "ok"
+            except EncryptedDocumentError as exc:
+                entry.summary = str(exc)
+                entry.summary_status = "encrypted"
+            except OcrNeededError as exc:
+                entry.summary = str(exc)
+                entry.summary_status = "ocr_needed"
+            except HwpParseError:
+                folder = os.path.dirname(entry.relative_path) or "(최상위)"
+                entry.summary = (
+                    f"HWP 본문을 읽지 못했습니다. 파일명과 상위 폴더({folder})를 기준으로 "
+                    "임시 분류합니다."
+                )
+                entry.summary_status = "hwp"
             except (ExtractionError, llm_client.OllamaError, OSError) as exc:
                 entry.summary = f"요약 불가: {exc}"
                 entry.summary_status = "failed"
@@ -84,7 +111,14 @@ def summarize_entries(
             progress_cb(i, total, entry)
 
 
-def propose_structure(entries: list[FileEntry], model: str) -> dict:
+def propose_structure(
+    entries: list[FileEntry], model: str, allowed_folders: list[str] | None = None
+) -> dict:
+    """규칙에 걸리지 않은 파일 중 요약이 있는 것만 AI에 보내 제안을 받는다.
+
+    규칙으로 이미 확실히 분류된 파일이나, 파일명만으로 판단 가능한 파일까지 매번
+    AI에 보내지 않도록 호출자(classify_entries)가 이미 대상을 추려서 넘긴다.
+    """
     summarized = [
         {"relative_path": e.relative_path, "ext": e.ext, "summary": e.summary or "(요약 없음)"}
         for e in entries
@@ -94,16 +128,108 @@ def propose_structure(entries: list[FileEntry], model: str) -> dict:
         return {
             "categories": [],
             "assignments": {},
-            "notes": "요약된 파일이 없어 폴더 구조를 제안할 수 없습니다.",
+            "notes": "AI에 보낼 파일이 없어 폴더 구조를 제안할 수 없습니다.",
         }
-    return llm_client.propose_folder_structure(summarized, model=model)
+    return llm_client.propose_folder_structure(
+        summarized, model=model, allowed_folders=allowed_folders
+    )
 
 
-def validate_assignments(entries: list[FileEntry], assignments: dict) -> dict:
-    """LLM이 만들어낸 assignments 중 실제로 존재하는 파일 경로만 남긴다."""
-    valid_paths = {e.relative_path for e in entries}
+def classify_entries(
+    entries: list[FileEntry],
+    template: templates.OrgTemplate,
+    model: str,
+    use_ai: bool = True,
+    user_rules: list[dict] | None = None,
+) -> dict:
+    """조직 규칙과 AI를 결합해 파일별 분류를 만든다.
+
+    우선순위: 조직/사용자 규칙(신뢰도 '높음', AI 호출 없이 즉시 결정)
+             -> 규칙에 안 걸린 파일 중 요약이 있는 것만 AI 분류
+             -> 그래도 안 걸린 파일은 미분류 폴더로.
+    Ollama가 꺼져 있어도(use_ai=False) 규칙 + 미분류 결과만으로 항상 동작한다.
+    """
+    rule_assignments = templates.classify_by_rules(entries, template, user_rules=user_rules)
+
+    remaining = [e for e in entries if e.relative_path not in rule_assignments]
+    ai_result = {"categories": [], "assignments": {}, "notes": ""}
+    if use_ai:
+        ai_result = propose_structure(remaining, model, allowed_folders=template.allowed_paths())
+
+    assignments = dict(rule_assignments)
+    for src, info in ai_result.get("assignments", {}).items():
+        if src not in assignments:
+            assignments[src] = info
+
+    unclassified_target = templates.UNCLASSIFIED_FOLDER
+    for entry in entries:
+        if entry.relative_path in assignments:
+            continue
+        if entry.summary_status not in ("ok", "empty"):
+            continue  # 미지원/실패/hwp 등은 사용자가 직접 목적지를 지정하도록 비워 둔다.
+        filename = os.path.basename(entry.relative_path)
+        assignments[entry.relative_path] = {
+            "dst": f"{unclassified_target}/{filename}",
+            "reason": "규칙과 AI 어느 쪽으로도 분류하지 못했습니다.",
+            "confidence": "낮음",
+            "source": "fallback",
+        }
+
     return {
-        src: dst
-        for src, dst in (assignments or {}).items()
-        if src in valid_paths and dst
+        "categories": ai_result.get("categories", []),
+        "assignments": assignments,
+        "notes": ai_result.get("notes", ""),
     }
+
+
+def validate_assignments(
+    entries: list[FileEntry], assignments: dict, root: str
+) -> tuple[dict, list[dict]]:
+    """규칙/AI가 만들어낸 assignments를 검증한다.
+
+    각 값은 {"dst","reason","confidence","source"} 형태(과거 호환을 위해 단순 문자열도
+    허용)이며, 원본 파일이 실제 스캔 목록에 있는지, 목적지가 대상 폴더(root) 내부의
+    안전한 경로인지, 대소문자만 다른 목적지끼리 충돌하지 않는지 확인한다.
+    반환값은 (통과한 항목, 거부된 항목과 사유) 튜플이다. 통과한 항목의 값도 항상
+    {"dst","reason","confidence","source"} 형태로 정규화된다.
+    """
+    valid_paths = {e.relative_path for e in entries}
+    valid: dict[str, dict] = {}
+    rejected: list[dict] = []
+    seen_casefold: dict[str, str] = {}
+
+    for src, raw in (assignments or {}).items():
+        if isinstance(raw, dict):
+            dst = raw.get("dst", "")
+            reason = raw.get("reason", "")
+            confidence = raw.get("confidence", "보통")
+            source = raw.get("source", "ai")
+        else:
+            dst, reason, confidence, source = (raw or ""), "", "보통", "ai"
+
+        if src not in valid_paths:
+            rejected.append({"src": src, "dst": dst, "reason": "스캔 목록에 없는 원본 파일입니다."})
+            continue
+        ok, path_reason = path_safety.is_safe_destination(root, dst or "")
+        if not ok:
+            rejected.append({"src": src, "dst": dst, "reason": path_reason})
+            continue
+        key = dst.casefold()
+        if key in seen_casefold:
+            rejected.append(
+                {
+                    "src": src,
+                    "dst": dst,
+                    "reason": f"'{seen_casefold[key]}'와 대소문자만 다른 목적지가 충돌합니다.",
+                }
+            )
+            continue
+        seen_casefold[key] = dst
+        valid[src] = {"dst": dst, "reason": reason, "confidence": confidence, "source": source}
+
+    return valid, rejected
+
+
+def plain_destinations(assignments: dict) -> dict[str, str]:
+    """검증된 assignments({"dst",...} 형태)를 file_ops가 쓰는 {src: dst} 평문 dict로 바꾼다."""
+    return {src: info["dst"] for src, info in assignments.items()}

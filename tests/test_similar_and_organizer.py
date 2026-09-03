@@ -1,8 +1,9 @@
 from datetime import datetime
 
-from app.organizer import validate_assignments
+from app.organizer import classify_entries, validate_assignments
 from app.scanner import FileEntry
 from app.similar import find_similar_documents
+from app.templates import default_template
 
 
 def _entry(rel_path: str, summary: str = "", file_hash: str = "") -> FileEntry:
@@ -39,7 +40,7 @@ def test_find_similar_documents_skips_exact_duplicates():
     assert find_similar_documents([a, b]) == []
 
 
-def test_validate_assignments_drops_unknown_or_empty_targets():
+def test_validate_assignments_drops_unknown_or_empty_targets(tmp_path):
     entries = [_entry("a.txt"), _entry("b.txt")]
     assignments = {
         "a.txt": "보고서/a.txt",
@@ -47,6 +48,56 @@ def test_validate_assignments_drops_unknown_or_empty_targets():
         "b.txt": "",
     }
 
-    result = validate_assignments(entries, assignments)
+    valid, rejected = validate_assignments(entries, assignments, str(tmp_path))
 
-    assert result == {"a.txt": "보고서/a.txt"}
+    assert valid.keys() == {"a.txt"}
+    assert valid["a.txt"]["dst"] == "보고서/a.txt"
+    assert {r["src"] for r in rejected} == {"존재하지않는파일.txt", "b.txt"}
+
+
+def test_validate_assignments_rejects_path_traversal(tmp_path):
+    entries = [_entry("a.txt")]
+    valid, rejected = validate_assignments(
+        entries, {"a.txt": "../outside.txt"}, str(tmp_path)
+    )
+    assert valid == {}
+    assert rejected[0]["src"] == "a.txt"
+
+
+def test_validate_assignments_rejects_absolute_destination(tmp_path):
+    entries = [_entry("a.txt")]
+    valid, rejected = validate_assignments(
+        entries, {"a.txt": "C:/other/a.txt"}, str(tmp_path)
+    )
+    assert valid == {}
+    assert len(rejected) == 1
+
+
+def test_validate_assignments_rejects_reserved_name(tmp_path):
+    entries = [_entry("a.txt")]
+    valid, rejected = validate_assignments(
+        entries, {"a.txt": "폴더/CON.txt"}, str(tmp_path)
+    )
+    assert valid == {}
+    assert len(rejected) == 1
+
+
+def test_validate_assignments_rejects_case_insensitive_collision(tmp_path):
+    entries = [_entry("a.txt"), _entry("b.txt")]
+    valid, rejected = validate_assignments(
+        entries,
+        {"a.txt": "보고서/Report.txt", "b.txt": "보고서/report.txt"},
+        str(tmp_path),
+    )
+    assert len(valid) == 1
+    assert len(rejected) == 1
+
+
+def test_classify_entries_without_ai_uses_rules_only():
+    entries = [_entry("주간회의록.txt"), _entry("이상한파일.txt")]
+    result = classify_entries(entries, default_template(), model="unused", use_ai=False)
+
+    assert "주간회의록.txt" in result["assignments"]
+    assert result["assignments"]["주간회의록.txt"]["source"] == "rule"
+    # AI가 꺼져 있으면 규칙에 안 걸린 pending 상태 파일은 미분류로도 강제 배정하지 않는다.
+    assert "이상한파일.txt" not in result["assignments"]
