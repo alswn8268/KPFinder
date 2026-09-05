@@ -141,6 +141,28 @@ def template_from_current_structure(entries: list[FileEntry], name: str) -> OrgT
     return OrgTemplate(name=name, folders=folders, keyword_rules=[])
 
 
+def template_from_folder_list(text: str, name: str, keep_unclassified: bool = True) -> OrgTemplate:
+    """사용자가 줄바꿈으로 직접 입력한 폴더 목록으로 템플릿을 만든다.
+
+    한 줄에 폴더 경로 하나씩("01_경영지원" 또는 "영업/실적"처럼 하위 폴더도 가능).
+    빈 줄, '#'으로 시작하는 줄은 무시한다.
+    """
+    folders = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip().strip("/\\")
+        if not line or line.startswith("#"):
+            continue
+        folders.append({"path": line, "description": ""})
+
+    if not folders:
+        raise ValueError("폴더 목록이 비어 있습니다. 한 줄에 하나씩 폴더 경로를 입력하세요.")
+
+    if keep_unclassified and not any(f["path"] == UNCLASSIFIED_FOLDER for f in folders):
+        folders.append({"path": UNCLASSIFIED_FOLDER, "description": "규칙/AI로 분류하지 못한 파일"})
+
+    return OrgTemplate(name=name, folders=folders, keyword_rules=[])
+
+
 def duplicate_hint(entry: FileEntry) -> bool:
     name_lower = entry.name.lower()
     return any(kw.lower() in name_lower for kw in DUPLICATE_HINT_KEYWORDS)

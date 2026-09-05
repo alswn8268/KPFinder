@@ -8,6 +8,7 @@ from app.templates import (
     export_template,
     import_template,
     template_from_current_structure,
+    template_from_folder_list,
 )
 
 
@@ -61,3 +62,18 @@ def test_template_from_current_structure_uses_top_dirs():
     entries = [_entry("영업/보고서.txt"), _entry("법무/계약서.txt"), _entry("최상위.txt")]
     tmpl = template_from_current_structure(entries, name="현재 구조")
     assert set(tmpl.allowed_paths()) >= {"영업", "법무"}
+
+
+def test_template_from_folder_list_parses_lines_and_ignores_comments():
+    text = "01_경영지원\n# 이 줄은 무시\n\n영업/실적\n"
+    tmpl = template_from_folder_list(text, name="내 템플릿")
+    assert "01_경영지원" in tmpl.allowed_paths()
+    assert "영업/실적" in tmpl.allowed_paths()
+    assert "99_미분류" in tmpl.allowed_paths()
+
+
+def test_template_from_folder_list_rejects_empty_input():
+    import pytest
+
+    with pytest.raises(ValueError):
+        template_from_folder_list("   \n# 주석뿐\n", name="빈 템플릿")

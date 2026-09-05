@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-from app import env_check, llm_client, templates
+from app import env_check, llm_client, rename_tool, structure_copy, templates
 from app.content_graph import GraphTooLargeError, render_content_graph
 from app.directory_graph import render_directory_relation_graph, render_directory_tree
 from app.file_ops import apply_move_plan, build_move_plan, undo_move_plan
@@ -145,6 +145,40 @@ with st.sidebar:
             )
             st.success("현재 폴더 구조를 템플릿으로 만들었습니다.")
 
+        st.caption("원하는 폴더 구조를 한 줄에 하나씩 직접 입력해서 템플릿으로 만들 수도 있습니다.")
+        custom_template_name = st.text_input("새 템플릿 이름", value="내 템플릿", key="custom_template_name")
+        custom_folder_text = st.text_area(
+            "폴더 목록(한 줄에 하나씩, 예: 영업/실적)",
+            placeholder="01_경영지원\n02_인사\n영업/실적",
+            key="custom_folder_text",
+            height=120,
+        )
+        if st.button("이 목록으로 템플릿 만들기", use_container_width=True, disabled=not custom_folder_text):
+            try:
+                st.session_state.template = templates.template_from_folder_list(
+                    custom_folder_text, name=custom_template_name or "내 템플릿"
+                )
+                st.success(f"템플릿 '{st.session_state.template.name}'을(를) 만들었습니다.")
+            except ValueError as exc:
+                st.error(str(exc))
+
+    with st.expander("📐 폴더 구조만 복사 (내용 없이)"):
+        st.caption("스캔된 폴더의 하위 폴더 체계만, 파일 내용 없이 다른 위치에 그대로 만듭니다.")
+        copy_dest = st.text_input("생성할 위치(대상 폴더)", key="structure_copy_dest")
+        if st.button(
+            "구조만 복사하기", use_container_width=True,
+            disabled=not (st.session_state.entries and copy_dest),
+        ):
+            try:
+                count, created, skipped = structure_copy.copy_structure_only(
+                    st.session_state.entries, copy_dest
+                )
+                st.success(f"{count}개 폴더를 만들었습니다: {copy_dest}")
+                if skipped:
+                    st.warning("일부 폴더는 건너뛰었습니다:\n" + "\n".join(f"- {s}" for s in skipped))
+            except OSError as exc:
+                st.error(f"폴더를 만들 수 없습니다: {exc}")
+
     scan_clicked = st.button("1️⃣ 스캔", use_container_width=True)
     classify_label = "2️⃣ 분류 실행 (규칙 + AI)" if use_ai else "2️⃣ 분류 실행 (규칙 기반, AI 미사용)"
     classify_clicked = st.button(
@@ -173,6 +207,7 @@ else:
     (
         tab_scan,
         tab_dup,
+        tab_rename,
         tab_dir_graph,
         tab_content_graph,
         tab_ai,
@@ -183,6 +218,7 @@ else:
         [
             "📋 스캔 결과",
             "🧬 중복 파일",
+            "✂️ 이름 일괄 변경",
             "🗂️ 디렉토리 구조/연관도",
             "🕸️ 파일 연관도",
             "🤖 AI 분석",
@@ -257,6 +293,95 @@ else:
                             f"- `{e.relative_path}` "
                             f"({round(e.size / 1024, 1)} KB, {e.modified:%Y-%m-%d})"
                         )
+
+    with tab_rename:
+        st.caption(
+            "선택한 파일들의 이름을 규칙에 따라 한 번에 바꿉니다. 실제로는 '같은 폴더로 이름만 "
+            "바꿔 이동'하는 것과 같아서, 이동 계획과 똑같은 안전성 검사(경로 보호, 덮어쓰기 금지, "
+            "실패 시 자동 복구)와 되돌리기가 그대로 적용됩니다."
+        )
+        rc1, rc2 = st.columns([1, 1])
+        with rc1:
+            rename_ext_filter = st.multiselect(
+                "대상 확장자(비워두면 전체)", sorted({e.ext or "(없음)" for e in entries}),
+                key="rename_ext_filter",
+            )
+        with rc2:
+            rename_query = st.text_input("파일명/경로 검색(비워두면 전체)", key="rename_query")
+
+        rename_targets = entries
+        if rename_ext_filter:
+            wanted = {e for e in rename_ext_filter if e != "(없음)"}
+            include_no_ext = "(없음)" in rename_ext_filter
+            rename_targets = [
+                e for e in rename_targets if (e.ext in wanted) or (include_no_ext and not e.ext)
+            ]
+        if rename_query:
+            rename_targets = search_entries(rename_targets, query=rename_query)
+
+        st.caption(f"대상 파일 {len(rename_targets)}개")
+
+        mode_labels = {
+            rename_tool.MODE_FIND_REPLACE: "찾기/바꾸기",
+            rename_tool.MODE_PREFIX: "앞에 문구 추가",
+            rename_tool.MODE_SUFFIX: "뒤에 문구 추가",
+            rename_tool.MODE_NUMBERING: "일련번호로 통일",
+        }
+        mode = st.radio(
+            "변경 방식", list(mode_labels.keys()), format_func=lambda m: mode_labels[m],
+            key="rename_mode", horizontal=True,
+        )
+
+        rule = {"mode": mode}
+        if mode == rename_tool.MODE_FIND_REPLACE:
+            fc1, fc2 = st.columns(2)
+            rule["find"] = fc1.text_input("찾을 문자열", key="rename_find")
+            rule["replace"] = fc2.text_input("바꿀 문자열", key="rename_replace")
+        elif mode in (rename_tool.MODE_PREFIX, rename_tool.MODE_SUFFIX):
+            rule["text"] = st.text_input("추가할 문구", key="rename_text")
+        elif mode == rename_tool.MODE_NUMBERING:
+            nc1, nc2, nc3 = st.columns(3)
+            rule["base_name"] = nc1.text_input("기본 이름(비워두면 원래 이름 유지)", key="rename_base")
+            rule["start"] = nc2.number_input("시작 번호", min_value=0, value=1, key="rename_start")
+            rule["digits"] = nc3.number_input("자릿수", min_value=1, max_value=6, value=3, key="rename_digits")
+
+        if rename_targets:
+            preview_rows = rename_tool.preview_rename(rename_targets, rule)
+            changed_rows = [r for r in preview_rows if r["changed"]]
+            preview_df = pd.DataFrame(
+                [{"기존 이름": r["old_name"], "새 이름": r["new_name"]} for r in preview_rows]
+            )
+            st.dataframe(preview_df, use_container_width=True, hide_index=True)
+
+            if not changed_rows:
+                st.info("규칙을 입력하면 미리보기가 표시됩니다.")
+            else:
+                st.warning(f"{len(changed_rows)}개 파일의 이름이 바뀝니다. 적용 전 위 내용을 확인하세요.")
+                rename_confirm = st.checkbox(
+                    "위 이름 변경 계획을 확인했으며, 실제로 적용하는 데 동의합니다.", key="rename_confirm"
+                )
+                if st.button("✂️ 이름 일괄 변경 적용", type="primary", disabled=not rename_confirm):
+                    rename_assignments = rename_tool.build_rename_assignments(rename_targets, rule)
+                    valid, rejected = validate_assignments(
+                        entries, rename_assignments, st.session_state.scan_root
+                    )
+                    if rejected:
+                        st.warning(
+                            "일부 항목은 안전성 검사에서 제외되었습니다:\n"
+                            + "\n".join(f"- `{r['src']}`: {r['reason']}" for r in rejected)
+                        )
+                    plan = build_move_plan(st.session_state.scan_root, plain_destinations(valid))
+                    log_path, moved_count = apply_move_plan(plan, entries)
+                    record_version(
+                        st.session_state.scan_root,
+                        log_path,
+                        note="파일명 일괄 변경",
+                        files_moved=moved_count,
+                    )
+                    st.success(f"{moved_count}개 파일의 이름을 변경했습니다.")
+                    st.info("문제가 있다면 '🕘 버전 관리' 탭에서 이 작업을 되돌릴 수 있습니다.")
+                    _do_scan(st.session_state.scan_root)
+                    st.rerun()
 
     with tab_dir_graph:
         st.caption(
