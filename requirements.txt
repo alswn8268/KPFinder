@@ -8,3 +8,5 @@ pypdf>=4.0
 networkx>=3.2
 matplotlib>=3.8
 olefile>=0.47
+fastapi>=0.115
+uvicorn[standard]>=0.30

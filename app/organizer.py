@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+from datetime import datetime
 
 from app import llm_client, path_safety, templates
 from app.scanner import FileEntry
@@ -56,6 +57,47 @@ def save_cache(root: str, cache: dict) -> None:
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
+def clear_cache(root: str) -> bool:
+    """이 폴더(root)의 요약 캐시만 지운다. 지울 캐시가 있었으면 True."""
+    path = _cache_path_for(root)
+    if os.path.exists(path):
+        os.remove(path)
+        return True
+    return False
+
+
+def clear_all_caches() -> int:
+    """모든 폴더의 요약 캐시를 지운다. 지운 파일 수를 반환한다."""
+    if not os.path.isdir(CACHE_DIR):
+        return 0
+    removed = 0
+    for name in os.listdir(CACHE_DIR):
+        if name.startswith("summary_cache_") and name.endswith(".json"):
+            try:
+                os.remove(os.path.join(CACHE_DIR, name))
+                removed += 1
+            except OSError:
+                continue
+    return removed
+
+
+def cache_metadata(root: str) -> dict:
+    """캐시 저장 위치, 생성 시각, 항목 수, 사용된 모델 목록을 사용자에게 보여주기 위한 정보."""
+    path = _cache_path_for(root)
+    if not os.path.exists(path):
+        return {"exists": False, "path": path, "entry_count": 0, "created_at": None, "models_used": []}
+    cache = load_cache(root)
+    models = sorted({entry.get("model", "") for entry in cache.values() if entry.get("model")})
+    created_at = datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds")
+    return {
+        "exists": True,
+        "path": path,
+        "entry_count": len(cache),
+        "created_at": created_at,
+        "models_used": models,
+    }
+
+
 def _cache_key(entry: FileEntry) -> str:
     # 해시+크기가 같으면 같은 파일 내용으로 간주해 재요약을 건너뛴다(속도 최적화).
     return f"{entry.file_hash}:{entry.size}"
@@ -105,7 +147,7 @@ def summarize_entries(
             except (ExtractionError, llm_client.OllamaError, OSError) as exc:
                 entry.summary = f"요약 불가: {exc}"
                 entry.summary_status = "failed"
-            cache[key] = {"summary": entry.summary, "status": entry.summary_status}
+            cache[key] = {"summary": entry.summary, "status": entry.summary_status, "model": model}
             save_cache(root, cache)
         if progress_cb:
             progress_cb(i, total, entry)
@@ -233,3 +275,33 @@ def validate_assignments(
 def plain_destinations(assignments: dict) -> dict[str, str]:
     """검증된 assignments({"dst",...} 형태)를 file_ops가 쓰는 {src: dst} 평문 dict로 바꾼다."""
     return {src: info["dst"] for src, info in assignments.items()}
+
+
+def merge_overrides(
+    entries: list[FileEntry], assignments: dict, overrides: dict, root: str
+) -> tuple[dict, dict, list[dict], set]:
+    """AI/규칙 제안(assignments)에 사용자 수정(overrides)을 반영하고 다시 검증한다.
+
+    overrides: {src: {"dst": str, "excluded": bool}}. 사용자가 목적지를 직접 고치거나
+    제외 처리한 뒤에도 안전성(경로 이탈, 대소문자 충돌 등)을 다시 검증해야 하므로
+    validate_assignments를 두 번(원본, 병합 후) 호출한다.
+
+    반환값: (원본 검증 결과 valid, 병합·재검증된 merged, 두 단계 거부 사유를 합친 rejected,
+             사용자가 제외한 src 집합)
+    """
+    valid, rejected = validate_assignments(entries, assignments, root)
+
+    excluded: set = set()
+    combined: dict[str, dict] = {}
+    for src, info in valid.items():
+        ov = (overrides or {}).get(src)
+        if ov and ov.get("excluded"):
+            excluded.add(src)
+            continue
+        if ov and ov.get("dst") and ov["dst"] != info["dst"]:
+            combined[src] = {**info, "dst": ov["dst"], "reason": "사용자가 직접 수정", "source": "user"}
+        else:
+            combined[src] = info
+
+    revalidated, extra_rejected = validate_assignments(entries, combined, root)
+    return valid, revalidated, rejected + extra_rejected, excluded

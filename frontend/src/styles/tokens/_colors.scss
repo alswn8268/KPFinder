@@ -1,0 +1,61 @@
+// 포인트 컬러(인디고-바이올렛)와 시맨틱 컬러를 CSS 커스텀 프로퍼티로 노출한다.
+// 컴포넌트는 여기 정의된 --color-* 변수만 참조해야 한다(원시 hex를 직접 쓰지 않는다) —
+// 그래야 포인트 컬러 하나를 바꿨을 때 전체에 전파된다(utils/colorRamp.ts가 런타임에도 갱신).
+
+:root {
+  // 포인트 컬러(액션/포커스/활성 상태 전용 — 상태 배지 색과 절대 겹치지 않는다)
+  --color-accent-50: #f4f3ff;
+  --color-accent-100: #ebe9fe;
+  --color-accent-200: #d9d6fe;
+  --color-accent-300: #bdb4fd;
+  --color-accent-400: #9b8afa;
+  --color-accent-500: #5b4fe9;
+  --color-accent-600: #4a3fd1;
+  --color-accent-700: #3c33a8;
+  --color-accent-soft: #eeebff;
+  --color-accent-contrast: #ffffff;
+
+  // 중립(배경/텍스트/테두리)
+  --color-bg: #f7f7fb;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-border: #e4e7ec;
+  --color-border-strong: #d0d5dd;
+  --color-text-primary: #1f2430;
+  --color-text-secondary: #5c6370;
+  --color-text-tertiary: #98a2b3;
+  --color-text-inverse: #ffffff;
+
+  // 시맨틱(신뢰도/상태 배지 등에서만 사용)
+  --color-success: #12b76a;
+  --color-success-soft: #e7f9f0;
+  --color-warning: #f79009;
+  --color-warning-soft: #fff6e8;
+  --color-danger: #f04438;
+  --color-danger-soft: #feecec;
+  --color-info: #0ea5e9;
+  --color-info-soft: #e7f6fd;
+  --color-neutral: #667085;
+  --color-neutral-soft: #f2f4f7;
+
+  --shadow-color: 220deg 30% 40%;
+}
+
+:root[data-theme='dark'] {
+  --color-bg: #14161f;
+  --color-surface: #1c1f2b;
+  --color-surface-raised: #232636;
+  --color-border: #2d3142;
+  --color-border-strong: #3a3f56;
+  --color-text-primary: #eef0f6;
+  --color-text-secondary: #a7adc0;
+  --color-text-tertiary: #6b7186;
+  --color-text-inverse: #14161f;
+
+  --color-accent-soft: #262247;
+  --color-success-soft: #0f2b21;
+  --color-warning-soft: #2e2007;
+  --color-danger-soft: #2e1414;
+  --color-info-soft: #0d2733;
+  --color-neutral-soft: #232636;
+}

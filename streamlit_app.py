@@ -36,6 +36,8 @@ from app.scanner import compute_hashes, find_duplicate_groups, scan_folder
 from app.search import search_entries
 from app.similar import find_similar_documents
 from app.version_history import can_restore, list_versions, mark_restored, record_version
+from sample_data.generate_sample_data import OUTPUT_DEFAULT as SAMPLE_DATA_OUTPUT_DEFAULT
+from sample_data.generate_sample_data import generate as generate_sample_data
 
 st.set_page_config(page_title="AI 폴더 정리 도우미", layout="wide")
 
@@ -101,15 +103,80 @@ def _merged_assignments(entries, proposal, root):
 
 with st.sidebar:
     st.header("설정")
-    folder_path = st.text_input("정리할 폴더 경로", value=st.session_state.scan_root)
-    model_name = st.text_input("Ollama 모델", value=llm_client.DEFAULT_MODEL)
+    folder_path = st.text_input(
+        "정리할 폴더 경로", value=st.session_state.scan_root, key="folder_path_input"
+    )
+
+    with st.expander("🧪 시연용 샘플 데이터"):
+        st.caption(
+            "이름 규칙이 제각각인 문서 30여 개와 완전 중복 파일 4개를 포함한 어질러진 폴더를 "
+            "한 번에 만듭니다. 이미 있는 폴더는 덮어쓰지 않습니다."
+        )
+        if st.button("샘플 데이터 만들기", use_container_width=True):
+            already_existed = os.path.exists(SAMPLE_DATA_OUTPUT_DEFAULT)
+            created = generate_sample_data(SAMPLE_DATA_OUTPUT_DEFAULT)
+            if already_existed and created == 0:
+                st.session_state["_sample_already_exists"] = True
+            else:
+                st.session_state["_sample_already_exists"] = False
+                st.session_state["folder_path_input"] = SAMPLE_DATA_OUTPUT_DEFAULT
+                st.success(f"시연용 샘플 폴더를 만들었습니다 ({created}개 파일).")
+                st.rerun()
+        if st.session_state.get("_sample_already_exists"):
+            st.warning("이미 샘플 폴더가 있습니다. 다시 만들려면 아래 버튼을 눌러 덮어쓰세요.")
+            if st.button("덮어쓰고 다시 만들기", use_container_width=True):
+                created = generate_sample_data(SAMPLE_DATA_OUTPUT_DEFAULT, force=True)
+                st.session_state["_sample_already_exists"] = False
+                st.session_state["folder_path_input"] = SAMPLE_DATA_OUTPUT_DEFAULT
+                st.success(f"시연용 샘플 폴더를 다시 만들었습니다 ({created}개 파일).")
+                st.rerun()
 
     ollama_ok = llm_client.check_connection()
     if ollama_ok:
         st.success("Ollama 연결됨")
+        installed_models = llm_client.list_installed_models()
     else:
         st.warning("Ollama에 연결할 수 없습니다. 규칙 기반 분류만으로도 계속 사용할 수 있습니다.")
+        installed_models = []
+
+    if installed_models:
+        def _format_model_option(name: str) -> str:
+            info = next((m for m in installed_models if m["name"] == name), None)
+            if not info:
+                return name
+            size = (
+                f"{info['size_mb'] / 1024:.1f}GB"
+                if info["size_mb"] >= 1024
+                else f"{info['size_mb']}MB"
+            )
+            extra = f" · {info['parameter_size']}" if info["parameter_size"] else ""
+            return f"{name} · {size}{extra}"
+
+        model_names = [m["name"] for m in installed_models]
+        # 목록은 크기순(작은 것부터) 정렬되어 있으므로, 기본 모델이 없으면 가장
+        # 가벼운 모델(index 0)을 골라 사양을 잘 모르는 사용자도 안전하게 시작하게 한다.
+        default_index = (
+            model_names.index(llm_client.DEFAULT_MODEL)
+            if llm_client.DEFAULT_MODEL in model_names
+            else 0
+        )
+        model_name = st.selectbox(
+            "Ollama 모델 (용량이 작을수록 사양 낮은 PC에 유리)",
+            options=model_names,
+            index=default_index,
+            format_func=_format_model_option,
+        )
+    else:
+        model_name = st.text_input(
+            "Ollama 모델", value=llm_client.DEFAULT_MODEL, disabled=not ollama_ok
+        )
+
     use_ai = st.checkbox("AI 분류 사용", value=ollama_ok, disabled=not ollama_ok)
+    if ollama_ok:
+        st.caption(
+            "PC 사양이 낮다면 위 체크를 꺼서 AI 없이 규칙 기반으로만 정리하거나, "
+            "가장 용량이 작은 모델을 고르세요."
+        )
 
     with st.expander("🩺 실행 환경 점검"):
         if st.button("환경 점검 실행/새로고침", use_container_width=True) or st.session_state.env_items is None:

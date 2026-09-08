@@ -2,10 +2,15 @@
 
 외부 API를 전혀 사용하지 않고 http://localhost:11434 에서 실행 중인
 Ollama 서버(모델: exaone3.5:2.4b, LG AI연구원 제작)에만 접속한다.
-GPU 없는 환경에서는 응답이 느릴 수 있어(문단 하나당 약 40~80초) 넉넉한 타임아웃을 둔다.
+
+실제 리허설 실측(2026-09-08, 로컬 PC): 파일 1개 요약 약 8~20초, 파일 10개를 한 번에
+구조화된 JSON(카테고리+파일별 목적지+이유+신뢰도)으로 묶어 제안받는 데는 약 258초
+(파일당 약 26초)가 걸렸다. 하드웨어에 따라 크게 달라지므로(GPU 유무 등), 요약보다
+폴더 구조 제안 쪽에 훨씬 넉넉한 타임아웃(STRUCTURE_TIMEOUT)을 둔다.
 """
 
 import json
+import re
 
 import requests
 
@@ -13,10 +18,41 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
 DEFAULT_MODEL = "exaone3.5:2.4b"
 DEFAULT_TIMEOUT = 120
+# 폴더 구조 제안은 파일이 여러 개일 때 한 번에 훨씬 긴 구조화된 JSON을 생성해야 하므로
+# 단순 요약(DEFAULT_TIMEOUT)보다 훨씬 넉넉한 타임아웃이 필요하다 — 실제 Ollama 연동
+# 리허설에서 10개 파일 기준 180초로는 부족한 것을 확인하고 늘렸다.
+STRUCTURE_TIMEOUT = 600
 
 
 class OllamaError(Exception):
     """Ollama 호출 중 발생한 오류."""
+
+
+def list_installed_models(base_url: str = OLLAMA_BASE_URL, timeout: int = 5) -> list[dict]:
+    """이 PC에 이미 받아져 있는 Ollama 모델 목록을 크기순(작은 것부터)으로 반환한다.
+
+    사양이 낮은 PC일수록 작은 모델을 고를 수 있도록, 사용자가 직접 판단할 수 있는
+    최소한의 정보(이름, 용량, 파라미터 크기)만 담는다. Ollama가 꺼져 있으면 빈 목록.
+    """
+    try:
+        resp = requests.get(f"{base_url}/api/tags", timeout=timeout)
+        resp.raise_for_status()
+        raw_models = resp.json().get("models", [])
+    except (requests.RequestException, ValueError):
+        return []
+
+    models = []
+    for m in raw_models:
+        details = m.get("details", {})
+        models.append(
+            {
+                "name": m.get("name", ""),
+                "size_mb": round(m.get("size", 0) / (1024 * 1024)),
+                "parameter_size": details.get("parameter_size", ""),
+                "quantization": details.get("quantization_level", ""),
+            }
+        )
+    return sorted(models, key=lambda m: m["size_mb"])
 
 
 def check_connection(base_url: str = OLLAMA_BASE_URL, timeout: int = 5) -> bool:
@@ -76,6 +112,7 @@ def propose_folder_structure(
     file_entries: list[dict],
     model: str = DEFAULT_MODEL,
     allowed_folders: list[str] | None = None,
+    timeout: int = STRUCTURE_TIMEOUT,
 ) -> dict:
     """파일별 요약을 바탕으로 새 폴더 구조와 파일별 이동 위치를 제안받는다.
 
@@ -119,7 +156,7 @@ def propose_folder_structure(
         },
         {"role": "user", "content": file_list_text},
     ]
-    content = chat(messages, model=model, timeout=180)
+    content = chat(messages, model=model, timeout=timeout)
     raw = _parse_json_response(content)
     raw["assignments"] = normalize_assignments(raw.get("assignments"))
     return raw
@@ -151,6 +188,17 @@ def normalize_assignments(raw_assignments) -> dict[str, dict]:
     return normalized
 
 
+# Windows 상대경로(예: "backup_old\사내_보안_정책.txt")를 모델이 JSON 문자열 안에 그대로
+# 베껴 쓰면서 백슬래시를 이스케이프하지 않는 경우가 실제 있었다(실기 리허설에서 재현) —
+# 유효한 JSON 이스케이프(\" \\ \/ \b \f \n \r \t \uXXXX)가 아닌 나 홀로 백슬래시만 골라
+# \\ 로 고쳐서 재시도한다.
+_INVALID_ESCAPE_RE = re.compile(r'\\(?!["\\/bfnrtu])')
+
+
+def _repair_invalid_escapes(text: str) -> str:
+    return _INVALID_ESCAPE_RE.sub(r"\\\\", text)
+
+
 def _parse_json_response(content: str) -> dict:
     text = content.strip()
     if text.startswith("```"):
@@ -165,5 +213,9 @@ def _parse_json_response(content: str) -> dict:
     json_text = text[start : end + 1]
     try:
         return json.loads(json_text)
+    except json.JSONDecodeError:
+        pass
+    try:
+        return json.loads(_repair_invalid_escapes(json_text))
     except json.JSONDecodeError as exc:
         raise OllamaError(f"JSON 파싱 실패: {exc}. 원본 일부: {content[:500]}") from exc
