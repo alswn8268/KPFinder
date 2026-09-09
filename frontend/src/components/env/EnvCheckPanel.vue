@@ -18,7 +18,7 @@ onMounted(() => {
 <template>
   <div class="env-panel">
     <div class="env-panel__header">
-      <h3>실행 환경 점검</h3>
+      <p class="env-panel__hint">문제가 있는 항목만 조치하면 됩니다. AI 관련 항목이 오류여도 규칙 기반 기능은 그대로 씁니다.</p>
       <BaseButton variant="secondary" size="sm" :loading="env.checking" @click="env.check(scan.root)">
         다시 확인
       </BaseButton>
@@ -39,13 +39,15 @@ onMounted(() => {
 <style scoped lang="scss">
 .env-panel__header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: var(--space-4);
   margin-bottom: var(--space-4);
+}
 
-  h3 {
-    font-size: var(--text-md);
-  }
+.env-panel__hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
 }
 
 .env-panel__list {

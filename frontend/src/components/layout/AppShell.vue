@@ -2,6 +2,8 @@
 import { storeToRefs } from 'pinia'
 import { onMounted, ref } from 'vue'
 
+import EnvDetailModal from '@/components/env/EnvDetailModal.vue'
+import EnvSummaryStrip from '@/components/env/EnvSummaryStrip.vue'
 import SideNav from '@/components/layout/SideNav.vue'
 import StepIndicator from '@/components/layout/StepIndicator.vue'
 import ToastHost from '@/components/base/ToastHost.vue'
@@ -13,6 +15,7 @@ const ui = useUiStore()
 const { pointColor } = storeToRefs(ui)
 const env = useEnvStore()
 const showGuide = ref(false)
+const showEnvDetail = ref(false)
 
 const PRESET_COLORS = ['#5B4FE9', '#0EA5A0', '#E8515A', '#2563EB', '#D97706']
 
@@ -63,14 +66,20 @@ function onColorInput(e: Event) {
           <button class="app-shell__guide-btn" @click="showGuide = true">
             <span aria-hidden="true">❓</span> 사용 가이드
           </button>
-          <div class="app-shell__env-pill" :class="{ 'is-error': env.hasBlockingError }">
-            <span class="app-shell__env-dot" />
-            {{ env.ollamaConnected() ? 'AI 연결됨' : 'AI 없이 사용 중' }}
-          </div>
+          <button
+            class="app-shell__env-trigger"
+            :class="{ 'is-error': env.hasBlockingError }"
+            aria-label="실행 환경 상세 보기"
+            @click="showEnvDetail = true"
+          >
+            <EnvSummaryStrip />
+            <span class="app-shell__env-trigger-hint">자세히 ›</span>
+          </button>
         </div>
       </header>
 
       <UsageGuideModal v-model="showGuide" />
+      <EnvDetailModal v-model="showEnvDetail" />
 
       <main class="app-shell__content">
         <RouterView v-slot="{ Component }">
@@ -225,46 +234,37 @@ function onColorInput(e: Event) {
   }
 }
 
-.app-shell__env-pill {
+.app-shell__env-trigger {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  color: var(--color-text-secondary);
-}
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
 
-.app-shell__env-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--color-success);
-  animation: env-dot-pulse 2.2s var(--ease-in-out) infinite;
-}
-
-.app-shell__env-pill.is-error .app-shell__env-dot {
-  background: var(--color-warning);
-  animation-name: env-dot-pulse-warn;
-}
-
-@keyframes env-dot-pulse-warn {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 var(--color-warning-soft);
+  &:hover {
+    border-color: var(--color-border-strong);
+    background: var(--color-neutral-soft);
+    transform: translateY(-1px);
   }
-  50% {
-    box-shadow: 0 0 0 4px transparent;
+
+  &:active {
+    transform: scale(0.98);
+  }
+
+  &.is-error {
+    border-color: var(--color-warning);
   }
 }
 
-@keyframes env-dot-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 var(--color-success-soft);
-  }
-  50% {
-    box-shadow: 0 0 0 4px transparent;
-  }
+.app-shell__env-trigger-hint {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
 }
 
 .app-shell__content {

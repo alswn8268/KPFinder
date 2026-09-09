@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { generateSampleData, listSampleDatasets } from '@/api/sampleData'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseCard from '@/components/base/BaseCard.vue'
-import EnvCheckPanel from '@/components/env/EnvCheckPanel.vue'
-import EnvSummaryStrip from '@/components/env/EnvSummaryStrip.vue'
 import type { SampleDatasetInfo } from '@/api/types'
 import { useScanStore } from '@/stores/scan'
 import { useTemplateStore } from '@/stores/template'
@@ -28,6 +26,8 @@ const sampleAlreadyExists = ref(false)
 const sampleDatasets = ref<SampleDatasetInfo[]>([])
 const selectedDataset = ref('general_office')
 const justGenerated = ref(false)
+
+const selectedDatasetInfo = computed(() => sampleDatasets.value.find((d) => d.key === selectedDataset.value))
 
 if (!template.active) template.loadDefault()
 classification.loadDefaultModel()
@@ -74,12 +74,6 @@ async function onGenerateSample(force = false) {
   }
 }
 
-// 폴더 경로 입력창 바로 아래 "테스트할 파일이 없나요?" 배너의 원클릭 버튼 — 현재 고른
-// 시나리오(기본값 general_office)로 즉시 샘플을 만들고, 성공하면 잠깐 색종이 효과로 보상감을 준다.
-async function onQuickStartSample() {
-  await onGenerateSample(false)
-}
-
 function playConfetti() {
   justGenerated.value = false
   requestAnimationFrame(() => {
@@ -94,113 +88,102 @@ function playConfetti() {
 <template>
   <div class="home">
     <section class="home__hero">
-      <div class="home__hero-text">
-        <h1>업무 폴더를 안전하게 정리하세요</h1>
-        <p>
-          문서 내용은 이 PC에서만 처리됩니다. 사용자가 최종 승인하기 전에는 어떤 파일도
-          이동하거나 삭제하지 않습니다.
-        </p>
-      </div>
-      <EnvSummaryStrip class="home__hero-env" />
+      <h1>업무 폴더를 안전하게 정리하세요</h1>
+      <p>
+        문서 내용은 이 PC에서만 처리됩니다. 사용자가 최종 승인하기 전에는 어떤 파일도
+        이동하거나 삭제하지 않습니다.
+      </p>
     </section>
 
-    <div class="home__grid">
-      <BaseCard class="home__scan-card">
-        <template #header>1️⃣ 정리할 폴더 선택</template>
-        <div class="home__field-wrap">
-          <div class="home__field" :class="{ 'home__field--success': justGenerated }">
-            <label for="folder-path">폴더 경로</label>
-            <input
-              id="folder-path"
-              v-model="folderPath"
-              type="text"
-              placeholder="예: C:\Users\me\Documents\업무폴더"
-              @keyup.enter="onScan"
-            />
-          </div>
-          <Transition name="pop">
-            <span v-if="justGenerated" class="home__field-success" aria-hidden="true">
-              ✅ 준비 완료!
-              <span class="home__confetti">
-                <i v-for="n in 8" :key="n" :style="{ '--angle': `${n * 45}deg` }" />
-              </span>
-            </span>
-          </Transition>
+    <BaseCard class="home__main-card">
+      <template #header>1️⃣ 정리할 폴더 선택</template>
+
+      <div class="home__field-wrap">
+        <div class="home__field" :class="{ 'home__field--success': justGenerated }">
+          <label for="folder-path">폴더 경로</label>
+          <input
+            id="folder-path"
+            v-model="folderPath"
+            type="text"
+            placeholder="예: C:\Users\me\Documents\업무폴더"
+            @keyup.enter="onScan"
+          />
         </div>
+        <Transition name="pop">
+          <span v-if="justGenerated" class="home__field-success" aria-hidden="true">
+            ✅ 준비 완료!
+            <span class="home__confetti">
+              <i v-for="n in 8" :key="n" :style="{ '--angle': `${n * 45}deg` }" />
+            </span>
+          </span>
+        </Transition>
+      </div>
 
-        <Transition name="rise">
-          <div v-if="!folderPath.trim()" class="home__quickstart">
-            <span class="home__quickstart-icon" aria-hidden="true">🧪</span>
-            <div class="home__quickstart-text">
+      <Transition name="rise">
+        <div v-if="!folderPath.trim() || sampleAlreadyExists" class="home__sample">
+          <div class="home__sample-head">
+            <span class="home__sample-icon" aria-hidden="true">🧪</span>
+            <div>
               <strong>테스트할 파일이 없나요?</strong>
-              <span>시연용 샘플 데이터가 있습니다! 클릭 한 번으로 바로 체험해보세요.</span>
-            </div>
-            <BaseButton size="sm" variant="secondary" :loading="generatingSample" @click="onQuickStartSample">
-              샘플로 바로 시작
-            </BaseButton>
-          </div>
-        </Transition>
-
-        <button class="home__advanced-toggle" @click="showAdvanced = !showAdvanced">
-          {{ showAdvanced ? '고급 옵션 숨기기' : '고급 옵션 (제외 폴더/확장자)' }}
-        </button>
-        <Transition name="rise">
-          <div v-if="showAdvanced" class="home__advanced">
-            <div class="home__field">
-              <label>제외할 폴더 (쉼표로 구분)</label>
-              <input v-model="excludeDirsText" type="text" placeholder="예: node_modules, .git" />
-            </div>
-            <div class="home__field">
-              <label>제외할 확장자 (쉼표로 구분)</label>
-              <input v-model="excludeExtsText" type="text" placeholder="예: .log, .tmp" />
+              <span>시연용 샘플 데이터가 있습니다! 부서를 고르고 바로 만들어보세요.</span>
             </div>
           </div>
-        </Transition>
-
-        <BaseButton block :loading="scan.scanning" @click="onScan">1️⃣ 스캔 시작</BaseButton>
-
-        <p class="home__template-summary">
-          조직 템플릿: <strong>{{ template.active?.name ?? '기본 조직 템플릿' }}</strong>
-          <RouterLink to="/templates">변경</RouterLink>
-        </p>
-      </BaseCard>
-
-      <div class="home__side">
-        <BaseCard>
-          <template #header>🧪 시연용 샘플 데이터</template>
-          <p class="home__sample-desc">
-            이름 규칙이 제각각인 문서와 완전 중복 파일을 포함한 어질러진 폴더를 한 번에
-            만듭니다. 부서별로 다른 시나리오를 골라 만들 수 있고, 이미 있는 폴더는
-            덮어쓰지 않습니다.
-          </p>
-          <div v-if="sampleDatasets.length" class="home__dataset-picker">
-            <label v-for="d in sampleDatasets" :key="d.key" class="home__dataset-option">
-              <input v-model="selectedDataset" type="radio" :value="d.key" name="sample-dataset" />
-              <span>
-                <strong>{{ d.label }}</strong>
-                <small>{{ d.description }}</small>
-              </span>
-            </label>
+          <div v-if="sampleDatasets.length" class="home__dataset-tabs" role="radiogroup" aria-label="시연 시나리오">
+            <button
+              v-for="d in sampleDatasets"
+              :key="d.key"
+              type="button"
+              class="home__dataset-tab"
+              :class="{ 'is-active': selectedDataset === d.key }"
+              role="radio"
+              :aria-checked="selectedDataset === d.key"
+              @click="selectedDataset = d.key"
+            >
+              {{ d.label }}
+            </button>
           </div>
-          <BaseButton variant="secondary" block :loading="generatingSample" @click="onGenerateSample(false)">
+          <Transition name="fade" mode="out-in">
+            <p v-if="selectedDatasetInfo" :key="selectedDatasetInfo.key" class="home__dataset-desc">
+              {{ selectedDatasetInfo.description }}
+            </p>
+          </Transition>
+          <BaseButton size="sm" variant="secondary" :loading="generatingSample" @click="onGenerateSample(false)">
             샘플 데이터 만들기
           </BaseButton>
           <Transition name="rise">
             <div v-if="sampleAlreadyExists" class="home__sample-overwrite">
-              <p>이미 폴더가 있어 새로 만들지 않았습니다.</p>
+              <p>이미 폴더가 있어 새로 만들지 않았습니다. 그대로 스캔하거나, 덮어쓰고 다시 만드세요.</p>
               <BaseButton variant="danger" size="sm" :loading="generatingSample" @click="onGenerateSample(true)">
                 덮어쓰고 다시 만들기
               </BaseButton>
             </div>
           </Transition>
-        </BaseCard>
+        </div>
+      </Transition>
 
-        <BaseCard>
-          <template #header>🩺 실행 환경</template>
-          <EnvCheckPanel />
-        </BaseCard>
-      </div>
-    </div>
+      <button class="home__advanced-toggle" @click="showAdvanced = !showAdvanced">
+        {{ showAdvanced ? '고급 옵션 숨기기' : '고급 옵션 (제외 폴더/확장자)' }}
+      </button>
+      <Transition name="rise">
+        <div v-if="showAdvanced" class="home__advanced">
+          <div class="home__field">
+            <label>제외할 폴더 (쉼표로 구분)</label>
+            <input v-model="excludeDirsText" type="text" placeholder="예: node_modules, .git" />
+          </div>
+          <div class="home__field">
+            <label>제외할 확장자 (쉼표로 구분)</label>
+            <input v-model="excludeExtsText" type="text" placeholder="예: .log, .tmp" />
+          </div>
+        </div>
+      </Transition>
+
+      <BaseButton block :loading="scan.scanning" @click="onScan">2️⃣ 스캔 시작</BaseButton>
+
+      <p class="home__template-summary">
+        조직 템플릿: <strong>{{ template.active?.name ?? '기본 조직 템플릿' }}</strong>
+        <RouterLink to="/templates">변경</RouterLink>
+      </p>
+    </BaseCard>
   </div>
 </template>
 
@@ -245,82 +228,32 @@ function playConfetti() {
   }
 }
 
-.home__hero-text {
-  flex: 1;
-  min-width: 260px;
-}
-
-.home__hero-env {
-  flex-shrink: 0;
-  padding-top: var(--space-1);
-}
-
-.home__grid {
-  display: grid;
-  grid-template-columns: 1.3fr 1fr;
-  gap: var(--space-6);
-  align-items: start;
-
-  > * {
-    animation: home-in 0.55s var(--ease-out) both;
-  }
-}
-
-.home__scan-card {
+.home__main-card {
+  max-width: 720px;
+  margin: 0 auto;
+  animation: home-in 0.55s var(--ease-out) both;
   animation-delay: 0.06s;
 }
 
-.home__side {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-
-  > *:nth-child(1) {
-    animation: home-in 0.55s var(--ease-out) both;
-    animation-delay: 0.12s;
-  }
-  > *:nth-child(2) {
-    animation: home-in 0.55s var(--ease-out) both;
-    animation-delay: 0.18s;
-  }
-}
-
-.home__quickstart {
+.home__sample {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
   margin-top: var(--space-4);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-4);
   border: 1px dashed var(--color-accent-300);
   border-radius: var(--radius-md);
   background: var(--color-accent-soft);
 }
 
-.home__quickstart-icon {
-  font-size: 22px;
-  animation: quickstart-bob 2.4s var(--ease-in-out) infinite;
-}
-
-@keyframes quickstart-bob {
-  0%,
-  100% {
-    transform: translateY(0) rotate(0deg);
-  }
-  50% {
-    transform: translateY(-4px) rotate(-6deg);
-  }
-}
-
-.home__quickstart-text {
+.home__sample-head {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 
   strong {
+    display: block;
     font-size: var(--text-sm);
+    margin-bottom: 2px;
   }
 
   span {
@@ -329,22 +262,18 @@ function playConfetti() {
   }
 }
 
-.home__quickstart-action {
-  position: relative;
-  flex-shrink: 0;
-
-  .base-btn {
-    animation: quickstart-glow 2.4s var(--ease-in-out) infinite;
-  }
+.home__sample-icon {
+  font-size: 22px;
+  animation: sample-bob 2.4s var(--ease-in-out) infinite;
 }
 
-@keyframes quickstart-glow {
+@keyframes sample-bob {
   0%,
   100% {
-    box-shadow: 0 0 0 0 var(--color-accent-100);
+    transform: translateY(0) rotate(0deg);
   }
   50% {
-    box-shadow: 0 0 0 6px transparent;
+    transform: translateY(-4px) rotate(-6deg);
   }
 }
 
@@ -388,60 +317,44 @@ function playConfetti() {
   }
 }
 
-.home__sample-desc {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  margin-bottom: var(--space-4);
+.home__dataset-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
-.home__dataset-picker {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin-bottom: var(--space-4);
-}
-
-.home__dataset-option {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
+.home__dataset-tab {
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
   transition:
     border-color var(--duration-fast) var(--ease-out),
     background var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-spring, var(--ease-out));
+    color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
 
   &:hover {
     transform: translateY(-1px);
+    border-color: var(--color-accent-400);
   }
 
-  &:has(input:checked) {
+  &.is-active {
     border-color: var(--color-accent-500);
-    background: var(--color-accent-soft);
-    transform: scale(1.015);
+    background: var(--color-accent-500);
+    color: var(--color-accent-contrast);
   }
+}
 
-  input {
-    margin-top: 3px;
-    accent-color: var(--color-accent-500);
-  }
-
-  span {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  strong {
-    font-size: var(--text-xs);
-  }
-
-  small {
-    font-size: 11.5px;
-    color: var(--color-text-tertiary);
-  }
+.home__dataset-desc {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-3);
+  min-height: 1.4em;
 }
 
 .home__sample-overwrite {
@@ -512,9 +425,4 @@ function playConfetti() {
   }
 }
 
-@media (max-width: 860px) {
-  .home__grid {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

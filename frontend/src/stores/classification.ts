@@ -17,6 +17,9 @@ export const useClassificationStore = defineStore('classification', () => {
   const model = ref('')
   const useAi = ref(true)
   const summarizing = ref(false)
+  const summarizeProgress = ref<{ current: number; total: number; currentFile: string } | null>(null)
+  const proposingStructure = ref(false)
+  const proposingCount = ref(0)
   const classifying = ref(false)
   const categories = ref<string[]>([])
   const assignments = ref<Record<string, AssignmentInfo>>({})
@@ -71,12 +74,31 @@ export const useClassificationStore = defineStore('classification', () => {
     classifying.value = true
     try {
       if (effectiveUseAi) {
-        summarizing.value = true
-        try {
-          const summarized = await summarizeEntries(entries, root, model.value)
-          summarized.forEach((updated, i) => Object.assign(entries[i], updated))
-        } finally {
-          summarizing.value = false
+        // 규칙만으로 먼저 걸러본다(AI 호출 없이 즉시) — 규칙으로 이미 확실한 파일까지
+        // 전부 요약하면 그만큼 느려지므로, 정말 규칙에 안 걸린 파일만 AI로 보낸다.
+        const rulePreview = await classifyEntries(entries, template, model.value, false, userRules)
+        const ruleMatched = new Set(Object.keys(rulePreview.assignments))
+        const remaining = entries.filter((e) => !ruleMatched.has(e.relative_path))
+
+        if (remaining.length) {
+          summarizing.value = true
+          summarizeProgress.value = { current: 0, total: remaining.length, currentFile: remaining[0].name }
+          try {
+            for (const entry of remaining) {
+              summarizeProgress.value = { ...summarizeProgress.value!, currentFile: entry.name }
+              const [updated] = await summarizeEntries([entry], root, model.value)
+              if (updated) Object.assign(entry, updated)
+              summarizeProgress.value = {
+                ...summarizeProgress.value!,
+                current: summarizeProgress.value!.current + 1,
+              }
+            }
+          } finally {
+            summarizing.value = false
+            summarizeProgress.value = null
+          }
+          proposingStructure.value = true
+          proposingCount.value = remaining.length
         }
       }
 
@@ -91,6 +113,8 @@ export const useClassificationStore = defineStore('classification', () => {
       return result
     } finally {
       classifying.value = false
+      proposingStructure.value = false
+      proposingCount.value = 0
     }
   }
 
@@ -108,6 +132,9 @@ export const useClassificationStore = defineStore('classification', () => {
     model,
     useAi,
     summarizing,
+    summarizeProgress,
+    proposingStructure,
+    proposingCount,
     classifying,
     categories,
     assignments,

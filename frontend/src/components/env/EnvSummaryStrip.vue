@@ -53,7 +53,7 @@ const STATUS_ICON: Record<string, string> = {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  max-width: 360px;
+  max-width: min(420px, 46vw);
   transition: opacity var(--duration-fast) var(--ease-out);
 
   &.is-loading {
@@ -98,11 +98,23 @@ const STATUS_ICON: Record<string, string> = {
   &--오류 {
     background: var(--color-danger-soft);
     color: var(--color-danger);
+    animation: chip-alert-pulse 2s var(--ease-in-out) infinite;
   }
 
   &--주의 {
     background: var(--color-warning-soft);
     color: var(--color-warning);
+    animation: chip-alert-pulse 2s var(--ease-in-out) infinite;
+  }
+}
+
+@keyframes chip-alert-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px transparent;
   }
 }
 

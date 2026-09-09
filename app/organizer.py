@@ -167,11 +167,13 @@ def propose_structure(
         if e.summary_status in ("ok", "empty")
     ]
     if not summarized:
-        return {
-            "categories": [],
-            "assignments": {},
-            "notes": "AI에 보낼 파일이 없어 폴더 구조를 제안할 수 없습니다.",
-        }
+        notes = (
+            "규칙만으로 모든 파일을 분류해 AI 호출이 필요하지 않았습니다."
+            if not entries
+            else "규칙에 걸리지 않은 파일이 있지만 요약이 없어(지원하지 않는 형식 등) AI에 보낼 수 "
+            "없습니다. 제안 편집에서 파일별로 직접 지정해 주세요."
+        )
+        return {"categories": [], "assignments": {}, "notes": notes}
     return llm_client.propose_folder_structure(
         summarized, model=model, allowed_folders=allowed_folders
     )

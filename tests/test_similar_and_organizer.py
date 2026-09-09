@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from app import llm_client
 from app.organizer import classify_entries, validate_assignments
 from app.scanner import FileEntry
 from app.similar import find_similar_documents
@@ -101,3 +102,21 @@ def test_classify_entries_without_ai_uses_rules_only():
     assert result["assignments"]["주간회의록.txt"]["source"] == "rule"
     # AI가 꺼져 있으면 규칙에 안 걸린 pending 상태 파일은 미분류로도 강제 배정하지 않는다.
     assert "이상한파일.txt" not in result["assignments"]
+
+
+def test_classify_entries_with_ai_skips_ollama_call_when_all_rule_matched(monkeypatch):
+    """규칙만으로 모든 파일이 분류되면(use_ai=True라도) 실제로 Ollama를 호출하지 않아야 한다 —
+    이 세션에서 발견된 "AI 분류가 너무 오래 걸린다"는 문제의 근본 원인은 규칙으로 이미 확실한
+    파일까지 전부 AI로 요약하던 것이었다. 회귀 방지용 테스트."""
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("규칙으로 전부 분류됐는데 Ollama가 호출되었습니다")
+
+    monkeypatch.setattr(llm_client, "propose_folder_structure", fail_if_called)
+
+    entries = [_entry("주간회의록.txt"), _entry("계약서_초안.txt")]
+    result = classify_entries(entries, default_template(), model="unused", use_ai=True)
+
+    assert result["assignments"]["주간회의록.txt"]["source"] == "rule"
+    assert result["assignments"]["계약서_초안.txt"]["source"] == "rule"
+    assert "AI 호출이 필요하지 않았습니다" in result["notes"]

@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import BaseBadge from '@/components/base/BaseBadge.vue'
-import SkeletonLoader from '@/components/base/SkeletonLoader.vue'
 import { SUMMARY_STATUS_LABEL } from '@/constants/status'
 import { useClassificationStore } from '@/stores/classification'
 import { useEditStore } from '@/stores/edit'
@@ -13,6 +12,10 @@ import { useEnvStore } from '@/stores/env'
 import { useScanStore } from '@/stores/scan'
 import { useTemplateStore } from '@/stores/template'
 import { useUiStore } from '@/stores/ui'
+
+// 실측 리허설(2026-09-08) 기준: 파일 요약 평균 약 8~20초, 폴더 구조 제안은 파일당 평균 약 26초.
+// 실제 소요 시간을 예측할 순 없지만, 이 값으로 "대략 이 정도" 감을 주는 정도로만 쓴다.
+const SECONDS_PER_STRUCTURE_FILE = 26
 
 const scan = useScanStore()
 const classification = useClassificationStore()
@@ -27,9 +30,37 @@ const effectiveUseAi = computed(() => classification.useAi && ollamaOk.value)
 
 const summarized = computed(() => scan.entries.filter((e) => e.summary_status !== 'pending'))
 
+const proposingElapsed = ref(0)
+let proposingTimer: number | undefined
+
+watch(
+  () => classification.proposingStructure,
+  (active) => {
+    if (active) {
+      proposingElapsed.value = 0
+      proposingTimer = window.setInterval(() => {
+        proposingElapsed.value += 1
+      }, 1000)
+    } else if (proposingTimer !== undefined) {
+      window.clearInterval(proposingTimer)
+      proposingTimer = undefined
+    }
+  },
+)
+
+onBeforeUnmount(() => {
+  if (proposingTimer !== undefined) window.clearInterval(proposingTimer)
+})
+
 function formatModelLabel(m: { name: string; size_mb: number; parameter_size: string }): string {
   const size = m.size_mb >= 1024 ? `${(m.size_mb / 1024).toFixed(1)}GB` : `${m.size_mb}MB`
   return `${m.name} · ${size}${m.parameter_size ? ` · ${m.parameter_size}` : ''}`
+}
+
+function formatSeconds(s: number): string {
+  const m = Math.floor(s / 60)
+  const sec = s % 60
+  return m > 0 ? `${m}분 ${sec}초` : `${sec}초`
 }
 
 onMounted(() => {
@@ -109,11 +140,43 @@ function goToProposal() {
         {{ effectiveUseAi ? '2️⃣ 분류 실행 (규칙 + AI)' : '2️⃣ 분류 실행 (규칙 기반, AI 미사용)' }}
       </BaseButton>
 
-      <SkeletonLoader
-        v-if="classification.summarizing"
-        :lines="4"
-        message="AI 분석 중입니다. GPU 없는 PC에서는 문서당 40~80초 정도 걸릴 수 있습니다."
-      />
+      <Transition name="rise">
+        <div v-if="classification.summarizing && classification.summarizeProgress" class="classify-view__progress">
+          <div class="classify-view__progress-head">
+            <span>
+              규칙에 안 걸린 파일만 AI로 요약 중
+              ({{ classification.summarizeProgress.current }}/{{ classification.summarizeProgress.total }})
+            </span>
+            <span class="classify-view__progress-pct">
+              {{ Math.round((classification.summarizeProgress.current / classification.summarizeProgress.total) * 100) }}%
+            </span>
+          </div>
+          <div class="classify-view__progress-bar">
+            <div
+              class="classify-view__progress-fill"
+              :style="{ width: `${(classification.summarizeProgress.current / classification.summarizeProgress.total) * 100}%` }"
+            />
+          </div>
+          <p class="classify-view__progress-detail mono">{{ classification.summarizeProgress.currentFile }}</p>
+        </div>
+      </Transition>
+
+      <Transition name="rise">
+        <div v-if="classification.proposingStructure" class="classify-view__progress">
+          <div class="classify-view__progress-head">
+            <span>AI가 {{ classification.proposingCount }}개 파일로 폴더 구조를 제안하는 중…</span>
+            <span class="classify-view__progress-pct">경과 {{ formatSeconds(proposingElapsed) }}</span>
+          </div>
+          <div class="classify-view__progress-bar classify-view__progress-bar--indeterminate">
+            <div class="classify-view__progress-fill classify-view__progress-fill--sweep" />
+          </div>
+          <p class="classify-view__progress-detail">
+            실측 기준 파일당 평균 약 {{ SECONDS_PER_STRUCTURE_FILE }}초 — 대략 최대
+            {{ formatSeconds(classification.proposingCount * SECONDS_PER_STRUCTURE_FILE) }} 정도 예상됩니다.
+            하드웨어에 따라 크게 달라질 수 있습니다.
+          </p>
+        </div>
+      </Transition>
     </BaseCard>
 
     <BaseCard v-if="summarized.length">
@@ -247,6 +310,70 @@ function goToProposal() {
     padding: var(--space-3);
     border-radius: var(--radius-md);
   }
+}
+
+.classify-view__progress {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-soft);
+}
+
+.classify-view__progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  margin-bottom: var(--space-2);
+}
+
+.classify-view__progress-pct {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--color-accent-600);
+  white-space: nowrap;
+}
+
+.classify-view__progress-bar {
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.classify-view__progress-fill {
+  height: 100%;
+  background: var(--color-accent-500);
+  border-radius: var(--radius-full);
+  transition: width var(--duration-base) var(--ease-out);
+}
+
+.classify-view__progress-bar--indeterminate {
+  position: relative;
+}
+
+.classify-view__progress-fill--sweep {
+  position: absolute;
+  width: 35%;
+  animation: progress-sweep 1.3s var(--ease-in-out) infinite;
+}
+
+@keyframes progress-sweep {
+  0% {
+    left: -35%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+.classify-view__progress-detail {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
 }
 
 .classify-view__table {

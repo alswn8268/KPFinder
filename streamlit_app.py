@@ -520,16 +520,30 @@ else:
     with tab_ai:
         if classify_clicked:
             effective_use_ai = use_ai and ollama_ok
+            remaining = entries
             if effective_use_ai:
+                # 규칙만으로 먼저 걸러본다(AI 호출 없이 즉시) — 규칙으로 이미 확실한 파일까지
+                # 전부 요약하면 그만큼 느려지므로, 정말 규칙에 안 걸린 파일만 AI로 보낸다.
+                rule_preview = classify_entries(entries, st.session_state.template, model_name, use_ai=False)
+                rule_matched = set(rule_preview["assignments"].keys())
+                remaining = [e for e in entries if e.relative_path not in rule_matched]
+
+            if effective_use_ai and remaining:
                 progress = st.progress(0.0, text="분류 준비 중...")
 
                 def on_progress(i: int, total: int, entry) -> None:
-                    progress.progress(i / total, text=f"({i}/{total}) {entry.name} 요약 중...")
+                    progress.progress(
+                        i / total, text=f"규칙에 안 걸린 파일만 AI로 요약 중 ({i}/{total}) {entry.name}"
+                    )
 
                 summarize_entries(
-                    entries, st.session_state.scan_root, model_name, progress_cb=on_progress
+                    remaining, st.session_state.scan_root, model_name, progress_cb=on_progress
                 )
-                progress.progress(1.0, text="요약 완료. 규칙/AI 분류 생성 중...")
+                progress.progress(
+                    1.0,
+                    text=f"요약 완료. AI가 {len(remaining)}개 파일로 폴더 구조를 제안하는 중... "
+                    "(파일이 많으면 몇 분 걸릴 수 있습니다)",
+                )
             else:
                 progress = None
 
