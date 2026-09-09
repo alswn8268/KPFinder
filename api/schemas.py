@@ -66,6 +66,19 @@ class ModelsResponse(BaseModel):
     models: list[OllamaModelModel]
 
 
+class RecommendedModelModel(BaseModel):
+    name: str
+    label: str
+    tier: str
+    size_gb: float
+    description: str
+    installed: bool
+
+
+class PullModelRequest(BaseModel):
+    model: str
+
+
 # ---- 템플릿 ----
 
 

@@ -120,6 +120,53 @@ def test_list_installed_models_returns_empty_list_when_ollama_unreachable(monkey
     assert llm_client.list_installed_models() == []
 
 
+def test_list_recommended_models_flags_which_are_already_installed(monkeypatch):
+    monkeypatch.setattr(
+        llm_client,
+        "list_installed_models",
+        lambda base_url=llm_client.OLLAMA_BASE_URL: [
+            {"name": llm_client.DEFAULT_MODEL, "size_mb": 1600, "parameter_size": "", "quantization": ""}
+        ],
+    )
+
+    recommended = llm_client.list_recommended_models()
+
+    by_name = {m["name"]: m["installed"] for m in recommended}
+    assert by_name[llm_client.DEFAULT_MODEL] is True
+    assert any(installed is False for name, installed in by_name.items() if name != llm_client.DEFAULT_MODEL)
+    # 추천 목록은 항상 용량 오름차순으로 정의돼 있어야 사양 낮은 사용자가 첫 항목만 봐도 된다.
+    sizes = [m["size_gb"] for m in recommended]
+    assert sizes == sorted(sizes)
+
+
+def test_pull_model_stream_yields_ollama_progress_lines(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def iter_lines(self):
+            yield b'{"status": "pulling manifest"}'
+            yield b""  # Ollama가 종종 빈 줄도 섞어 보낸다 — 건너뛰어야 한다
+            yield b'{"status": "success"}'
+
+    captured = {}
+
+    def fake_post(url, json=None, stream=None, timeout=None):
+        captured["url"] = url
+        captured["json"] = json
+        captured["stream"] = stream
+        return FakeResponse()
+
+    monkeypatch.setattr(llm_client.requests, "post", fake_post)
+
+    lines = list(llm_client.pull_model_stream("qwen2.5:1.5b"))
+
+    assert lines == ['{"status": "pulling manifest"}', '{"status": "success"}']
+    assert captured["json"] == {"name": "qwen2.5:1.5b", "stream": True}
+    assert captured["stream"] is True
+    assert captured["url"].endswith("/api/pull")
+
+
 def test_propose_folder_structure_timeout_is_overridable(monkeypatch):
     captured = {}
 

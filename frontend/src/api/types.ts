@@ -223,3 +223,20 @@ export interface ModelsResponse {
   connected: boolean
   models: OllamaModelInfo[]
 }
+
+export interface RecommendedModelInfo {
+  name: string
+  label: string
+  tier: string
+  size_gb: number
+  description: string
+  installed: boolean
+}
+
+export interface PullProgressEvent {
+  status: string
+  digest?: string
+  total?: number
+  completed?: number
+  error?: string
+}

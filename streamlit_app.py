@@ -7,6 +7,7 @@ AI는 '적용' 버튼을 누르기 전까지 어떤 파일도 이동/수정/삭�
 적용 후에는 버전 히스토리에 기록되어 언제든 되돌릴 수 있다.
 """
 
+import json
 import os
 from datetime import datetime
 
@@ -189,6 +190,46 @@ with st.sidebar:
             "PC 사양이 낮다면 위 체크를 꺼서 AI 없이 규칙 기반으로만 정리하거나, "
             "가장 용량이 작은 모델을 고르세요."
         )
+
+    with st.expander("📥 사양에 맞는 모델 다운로드"):
+        st.caption(
+            "Ollama를 막 설치해 모델이 하나도 없거나, 지금 모델보다 더 가볍거나(또는 더 정교한) "
+            "모델이 필요할 때 사양별로 골라 바로 받을 수 있습니다."
+        )
+        if not ollama_ok:
+            st.warning("Ollama에 연결할 수 없어 다운로드할 수 없습니다. Ollama를 먼저 실행하세요.")
+        else:
+            recommended = llm_client.list_recommended_models()
+            for rm in recommended:
+                cols = st.columns([3, 1])
+                with cols[0]:
+                    st.markdown(f"**{rm['label']}** · {rm['tier']} · 약 {rm['size_gb']}GB")
+                    st.caption(rm["description"])
+                with cols[1]:
+                    if rm["installed"]:
+                        st.success("설치됨")
+                    elif st.button("다운로드", key=f"pull_{rm['name']}", use_container_width=True):
+                        progress = st.progress(0.0, text="다운로드 준비 중...")
+                        last_pct = 0.0
+                        try:
+                            for line in llm_client.pull_model_stream(rm["name"]):
+                                evt = json.loads(line)
+                                status = evt.get("status", "")
+                                total = evt.get("total")
+                                completed = evt.get("completed")
+                                if status == "downloading" and total and completed is not None:
+                                    last_pct = completed / total
+                                    progress.progress(
+                                        last_pct,
+                                        text=f"다운로드 중 ({completed / 1024 / 1024:.0f}MB / {total / 1024 / 1024:.0f}MB)",
+                                    )
+                                else:
+                                    progress.progress(last_pct, text=status)
+                            progress.progress(1.0, text="완료!")
+                            st.success(f"'{rm['label']}' 모델을 받았습니다.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"다운로드 실패: {exc}")
 
     with st.expander("🩺 실행 환경 점검"):
         if st.button("환경 점검 실행/새로고침", use_container_width=True) or st.session_state.env_items is None:

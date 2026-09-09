@@ -5,6 +5,8 @@ import { useRouter } from 'vue-router'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import BaseBadge from '@/components/base/BaseBadge.vue'
+import { listRecommendedModels, pullModel } from '@/api/models'
+import type { PullProgressEvent, RecommendedModelInfo } from '@/api/types'
 import { SUMMARY_STATUS_LABEL } from '@/constants/status'
 import { useClassificationStore } from '@/stores/classification'
 import { useEditStore } from '@/stores/edit'
@@ -66,6 +68,54 @@ function formatSeconds(s: number): string {
 onMounted(() => {
   if (ollamaOk.value) classification.loadAvailableModels()
 })
+
+const showDownload = ref(false)
+const recommendedModels = ref<RecommendedModelInfo[]>([])
+const downloadingName = ref<string | null>(null)
+const downloadStatus = ref('')
+const downloadPct = ref<number | null>(null)
+
+async function loadRecommended() {
+  try {
+    recommendedModels.value = await listRecommendedModels()
+  } catch {
+    // 목록을 못 불러와도(예: Ollama 연결 끊김) 무시 — 버튼을 눌렀을 때 다시 시도된다
+  }
+}
+
+watch(showDownload, (open) => {
+  if (open && !recommendedModels.value.length) loadRecommended()
+})
+
+function formatMb(bytes: number): string {
+  return `${Math.round(bytes / 1024 / 1024)}MB`
+}
+
+function onPullProgress(evt: PullProgressEvent) {
+  if (evt.status === 'downloading' && evt.total && evt.completed !== undefined) {
+    downloadStatus.value = `다운로드 중 (${formatMb(evt.completed)} / ${formatMb(evt.total)})`
+    downloadPct.value = Math.round((evt.completed / evt.total) * 100)
+  } else {
+    downloadStatus.value = evt.status
+  }
+}
+
+async function onDownload(m: RecommendedModelInfo) {
+  downloadingName.value = m.name
+  downloadStatus.value = '다운로드 준비 중…'
+  downloadPct.value = null
+  try {
+    await pullModel(m.name, onPullProgress)
+    ui.pushToast(`'${m.label}' 모델을 받았습니다. 목록에서 바로 골라 쓸 수 있어요.`, 'success')
+    await classification.loadAvailableModels()
+    classification.selectModel(m.name)
+    await loadRecommended()
+  } catch (err) {
+    ui.pushToast(`다운로드에 실패했습니다: ${err instanceof Error ? err.message : err}`, 'error')
+  } finally {
+    downloadingName.value = null
+  }
+}
 
 async function onClassify() {
   if (!template.active) await template.loadDefault()
@@ -136,6 +186,51 @@ function goToProposal() {
       <p v-if="!ollamaOk" class="classify-view__notice">
         Ollama에 연결할 수 없습니다. 규칙 기반 분류만으로도 계속 사용할 수 있습니다.
       </p>
+
+      <button v-if="ollamaOk" type="button" class="classify-view__download-toggle" @click="showDownload = !showDownload">
+        {{ showDownload ? '모델 다운로드 닫기' : '📥 사양에 맞는 모델을 아직 안 받으셨나요? — 여기서 바로 받기' }}
+      </button>
+      <Transition name="rise">
+        <div v-if="showDownload" class="classify-view__download">
+          <p class="classify-view__download-hint">
+            Ollama를 막 설치해 모델이 하나도 없거나, 지금 모델보다 더 가벼운(또는 더 정교한) 모델이
+            필요할 때 사양별로 골라 바로 받을 수 있습니다. 다운로드는 이 PC의 Ollama가 직접
+            처리하며, 창을 닫아도 계속 진행됩니다.
+          </p>
+          <div v-if="recommendedModels.length" class="classify-view__download-list">
+            <div v-for="m in recommendedModels" :key="m.name" class="classify-view__download-card">
+              <div class="classify-view__download-card-head">
+                <span class="classify-view__download-tier">{{ m.tier }}</span>
+                <strong>{{ m.label }}</strong>
+                <span class="classify-view__download-size">약 {{ m.size_gb }}GB</span>
+              </div>
+              <p class="classify-view__download-desc">{{ m.description }}</p>
+
+              <BaseBadge v-if="m.installed" tone="success" size="sm">✓ 설치됨</BaseBadge>
+              <BaseButton
+                v-else-if="downloadingName !== m.name"
+                variant="secondary"
+                size="sm"
+                :disabled="downloadingName !== null"
+                @click="onDownload(m)"
+              >
+                다운로드
+              </BaseButton>
+              <div v-else class="classify-view__download-progress">
+                <div class="classify-view__progress-bar" :class="{ 'classify-view__progress-bar--indeterminate': downloadPct === null }">
+                  <div
+                    v-if="downloadPct !== null"
+                    class="classify-view__progress-fill"
+                    :style="{ width: `${downloadPct}%` }"
+                  />
+                  <div v-else class="classify-view__progress-fill classify-view__progress-fill--sweep" />
+                </div>
+                <p class="classify-view__progress-detail">{{ downloadStatus }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
       <BaseButton :loading="classification.classifying" @click="onClassify">
         {{ effectiveUseAi ? '2️⃣ 분류 실행 (규칙 + AI)' : '2️⃣ 분류 실행 (규칙 기반, AI 미사용)' }}
       </BaseButton>
@@ -310,6 +405,77 @@ function goToProposal() {
     padding: var(--space-3);
     border-radius: var(--radius-md);
   }
+}
+
+.classify-view__download-toggle {
+  display: block;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-accent-600);
+  margin-bottom: var(--space-3);
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.classify-view__download {
+  margin-bottom: var(--space-4);
+}
+
+.classify-view__download-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.classify-view__download-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.classify-view__download-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.classify-view__download-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  strong {
+    font-size: var(--text-sm);
+  }
+}
+
+.classify-view__download-tier {
+  font-size: 10.5px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-accent-600);
+}
+
+.classify-view__download-size {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+}
+
+.classify-view__download-desc {
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  flex: 1;
+}
+
+.classify-view__download-progress {
+  width: 100%;
 }
 
 .classify-view__progress {

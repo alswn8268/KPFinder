@@ -28,6 +28,59 @@ class OllamaError(Exception):
     """Ollama 호출 중 발생한 오류."""
 
 
+# 사양별로 바로 받을 수 있도록 미리 골라 둔 모델 목록 — 용량이 작은 순서.
+# EXAONE 계열은 한국어 문서 요약에 강해 이 앱의 주 용도(사내 업무 문서 정리)에 잘
+# 맞으므로 기본값으로 유지하고, 그보다 더 가벼운/무거운 대안을 양 끝에 하나씩 둔다.
+RECOMMENDED_MODELS = [
+    {
+        "name": "qwen2.5:1.5b",
+        "label": "Qwen2.5 1.5B",
+        "tier": "최소 사양",
+        "size_gb": 1.0,
+        "description": "가장 가볍고 빠릅니다. GPU가 없거나 RAM이 8GB 이하인 PC에 적합하지만, 한국어 요약 품질은 EXAONE보다 떨어질 수 있습니다.",
+    },
+    {
+        "name": DEFAULT_MODEL,
+        "label": "EXAONE 3.5 2.4B (기본 추천)",
+        "tier": "일반 사양",
+        "size_gb": 1.6,
+        "description": "이 앱의 기본 모델입니다. LG AI연구원이 한국어에 맞춰 학습해 업무 문서 요약에 적합하고, 일반적인 사무용 PC에서 무난하게 동작합니다.",
+    },
+    {
+        "name": "exaone3.5:7.8b",
+        "label": "EXAONE 3.5 7.8B (고성능)",
+        "tier": "고사양",
+        "size_gb": 4.8,
+        "description": "더 크고 정교한 모델로 분류 품질이 좋아지지만, 다운로드 용량이 크고 GPU가 없으면 느릴 수 있습니다.",
+    },
+]
+
+
+def list_recommended_models(base_url: str = OLLAMA_BASE_URL) -> list[dict]:
+    """사양별 추천 모델 목록에, 이 PC에 이미 설치돼 있는지 여부를 표시해 반환한다."""
+    installed_names = {m["name"] for m in list_installed_models(base_url)}
+    return [
+        {**model, "installed": model["name"] in installed_names} for model in RECOMMENDED_MODELS
+    ]
+
+
+def pull_model_stream(model: str, base_url: str = OLLAMA_BASE_URL):
+    """모델을 다운로드하며 Ollama가 보내는 진행 상황을 한 줄(JSON 문자열)씩 그대로 넘긴다.
+
+    각 줄은 최소 {"status": "..."}이고, 다운로드 중에는 {"status": "downloading",
+    "digest": "...", "total": <bytes>, "completed": <bytes>}가 반복해서 온다.
+    큰 모델은 수 분 걸릴 수 있으므로 타임아웃을 걸지 않는다 — 대신 호출자가 스트림을
+    끝까지 소비하지 않고 연결을 끊으면(예: 사용자가 페이지를 벗어남) 자연히 중단된다.
+    """
+    resp = requests.post(
+        f"{base_url}/api/pull", json={"name": model, "stream": True}, stream=True, timeout=None
+    )
+    resp.raise_for_status()
+    for line in resp.iter_lines():
+        if line:
+            yield line.decode("utf-8")
+
+
 def list_installed_models(base_url: str = OLLAMA_BASE_URL, timeout: int = 5) -> list[dict]:
     """이 PC에 이미 받아져 있는 Ollama 모델 목록을 크기순(작은 것부터)으로 반환한다.
 
