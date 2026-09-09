@@ -58,6 +58,14 @@ def directory_tree(req: GraphRequest):
 
 @router.post("/directory-relation", response_model=GraphResponse)
 def directory_relation(req: GraphRequest):
+    if len(req.entries) > MAX_NODES_FOR_GRAPH:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"파일이 너무 많아({len(req.entries)}개) 폴더 연관도를 계산하지 않습니다. "
+                f"{MAX_NODES_FOR_GRAPH}개 이하일 때만 지원합니다."
+            ),
+        )
     entries = models_to_entries(req.entries)
     graph = build_directory_relation_graph(entries, min_score=req.min_score)
     graph = graph.copy()

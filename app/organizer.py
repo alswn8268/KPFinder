@@ -108,8 +108,10 @@ def summarize_entries(
 ) -> None:
     """각 FileEntry.summary / summary_status를 채운다. 캐시가 있으면 LLM 호출을 건너뛴다.
 
-    .hwp처럼 본문 추출이 불가능한 형식은 LLM을 호출하지 않고 파일명/상위 폴더 기반의
-    안내 문구만 채운다. 암호화 문서, 이미지형 PDF는 각각 구분된 상태로 표시한다.
+    .hwp는 OLE 레코드를 직접 해석하는 best-effort 추출을 시도하고, 성공하면 다른 형식과
+    똑같이 LLM 요약을 호출한다(status="ok"). 추출 자체가 실패했을 때만(HwpParseError)
+    LLM을 호출하지 않고 파일명/상위 폴더 기반의 안내 문구로 대체한다(status="hwp").
+    암호화 문서, 이미지형 PDF는 각각 구분된 상태로 표시한다.
     """
     cache = load_cache(root)
     total = len(entries)
@@ -200,10 +202,19 @@ def classify_entries(
     if use_ai:
         ai_result = propose_structure(remaining, model, allowed_folders=template.allowed_paths())
 
+    # AI는 프롬프트로만 template.allowed_paths() 안에서 고르도록 "부탁"받을 뿐, 강제되지
+    # 않는다(작은 로컬 모델은 종종 지시를 무시하고 목록에 없는 폴더를 지어낸다). 여기서
+    # 실제로 걸러야만 "AI가 템플릿 밖 임의 폴더를 만들 수 없다"는 안전 원칙이 지켜진다.
+    allowed = set(template.allowed_paths())
     assignments = dict(rule_assignments)
     for src, info in ai_result.get("assignments", {}).items():
-        if src not in assignments:
-            assignments[src] = info
+        if src in assignments:
+            continue
+        dst = info.get("dst", "")
+        folder = dst.rsplit("/", 1)[0] if "/" in dst else dst
+        if folder not in allowed:
+            continue  # 템플릿 밖 폴더 제안은 무시하고 아래 미분류 처리로 넘긴다.
+        assignments[src] = info
 
     unclassified_target = templates.UNCLASSIFIED_FOLDER
     for entry in entries:

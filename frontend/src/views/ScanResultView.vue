@@ -81,6 +81,9 @@ async function onCopyStructure() {
   try {
     const result = await copyStructureOnly(scan.entries, copyDest.value.trim())
     ui.pushToast(`${result.count}개 폴더를 만들었습니다: ${copyDest.value}`, 'success')
+    if (result.skipped.length) {
+      ui.pushToast(`일부 폴더는 건너뛰었습니다: ${result.skipped.join(', ')}`, 'warning')
+    }
   } finally {
     copying.value = false
   }

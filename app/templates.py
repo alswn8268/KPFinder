@@ -176,7 +176,9 @@ def classify_by_rules(
     규칙에 걸리지 않은 파일은 결과 dict에 포함되지 않는다(호출자가 AI 또는
     미분류 처리로 넘겨야 함). 반환값: {rel_path: {"dst", "reason", "confidence", "source"}}
     """
-    rules = list(user_rules or []) + template.keyword_rules
+    # 우선순위(모듈 docstring 참고): 조직 고정 규칙 -> 사용자 지정 규칙. 조직 규칙을
+    # 먼저 두어야 첫 매치 우선(break) 로직에서 조직 규칙이 사용자 규칙에 덮이지 않는다.
+    rules = list(template.keyword_rules) + list(user_rules or [])
     result: dict[str, dict] = {}
     for entry in entries:
         haystack = f"{entry.name} {entry.summary or ''}".lower()

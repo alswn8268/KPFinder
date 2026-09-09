@@ -8,7 +8,6 @@ const scan = useScanStore()
 const classification = useClassificationStore()
 
 const coreLinks = computed(() => [
-  { to: '/', label: '시작', icon: '🏠', enabled: true },
   { to: '/scan', label: '스캔 결과', icon: '📋', enabled: scan.hasScanned },
   { to: '/classify', label: '분류 실행', icon: '🤖', enabled: scan.hasScanned },
   { to: '/proposal', label: '제안 편집', icon: '📝', enabled: classification.hasResult },

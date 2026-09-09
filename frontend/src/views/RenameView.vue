@@ -1,20 +1,23 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import { buildRenameAssignments, previewRename } from '@/api/rename'
+import { buildRenameAssignments, previewRename, suggestRenameAssignments } from '@/api/rename'
 import { applyPlan } from '@/api/apply'
-import type { RenameMode, RenamePreviewRow } from '@/api/types'
+import { validateAssignments } from '@/api/edit'
+import type { AssignmentInfo, RenameMode, RenamePreviewRow } from '@/api/types'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { useScanStore } from '@/stores/scan'
 import { useUiStore } from '@/stores/ui'
+
+type ModeOrSuggest = RenameMode | 'suggest'
 
 const scan = useScanStore()
 const ui = useUiStore()
 
 const extFilter = ref('')
 const queryFilter = ref('')
-const mode = ref<RenameMode>('find_replace')
+const mode = ref<ModeOrSuggest>('find_replace')
 const find = ref('')
 const replace = ref('')
 const text = ref('')
@@ -38,7 +41,7 @@ const targetEntries = computed(() => {
 })
 
 const rule = computed(() => ({
-  mode: mode.value,
+  mode: mode.value as RenameMode,
   find: find.value,
   replace: replace.value,
   text: text.value,
@@ -49,9 +52,26 @@ const rule = computed(() => ({
 
 const changedRows = computed(() => rows.value.filter((r) => r.changed))
 
+function rowsFromAssignments(assignments: Record<string, AssignmentInfo>): RenamePreviewRow[] {
+  return targetEntries.value.map((e) => {
+    const info = assignments[e.relative_path]
+    return {
+      src: e.relative_path,
+      old_name: e.name,
+      new_name: info ? info.dst.split('/').pop()! : e.name,
+      dst: info?.dst ?? e.relative_path,
+      changed: !!info,
+    }
+  })
+}
+
 async function refreshPreview() {
   if (targetEntries.value.length === 0) {
     rows.value = []
+    return
+  }
+  if (mode.value === 'suggest') {
+    rows.value = rowsFromAssignments(await suggestRenameAssignments(targetEntries.value))
     return
   }
   rows.value = await previewRename(targetEntries.value, rule.value)
@@ -62,8 +82,21 @@ watch([targetEntries, rule], refreshPreview, { immediate: true, deep: true })
 async function onApply() {
   applying.value = true
   try {
-    const assignments = await buildRenameAssignments(targetEntries.value, rule.value)
-    const result = await applyPlan(scan.root, assignments, scan.entries, '파일명 일괄 변경')
+    const assignments =
+      mode.value === 'suggest'
+        ? await suggestRenameAssignments(targetEntries.value)
+        : await buildRenameAssignments(targetEntries.value, rule.value)
+    // 이동 계획과 똑같은 안전성 검사를 거친다 — 그렇지 않으면 예약어/충돌 등으로 걸러진
+    // 파일이 아무 설명 없이 조용히 이름 변경 대상에서 빠져버린다.
+    const validated = await validateAssignments(scan.entries, scan.root, assignments)
+    if (validated.rejected.length) {
+      ui.pushToast(
+        `${validated.rejected.length}개 파일은 안전성 검사에서 제외되었습니다: ` +
+          validated.rejected.map((r) => `${r.src}(${r.reason})`).join(', '),
+        'warning',
+      )
+    }
+    const result = await applyPlan(scan.root, validated.merged, scan.entries, '파일명 일괄 변경')
     ui.pushToast(`${result.moved_count}개 파일의 이름을 변경했습니다.`, 'success')
     await scan.scan(scan.root)
     confirmChecked.value = false
@@ -92,9 +125,17 @@ async function onApply() {
       <p class="rename-view__count">대상 파일 {{ targetEntries.length }}개</p>
 
       <div class="rename-view__mode">
-        <label v-for="m in (['find_replace', 'prefix', 'suffix', 'numbering'] as RenameMode[])" :key="m">
+        <label v-for="m in (['find_replace', 'prefix', 'suffix', 'numbering', 'suggest'] as ModeOrSuggest[])" :key="m">
           <input v-model="mode" type="radio" :value="m" />
-          {{ { find_replace: '찾기/바꾸기', prefix: '앞에 문구 추가', suffix: '뒤에 문구 추가', numbering: '일련번호로 통일' }[m] }}
+          {{
+            {
+              find_replace: '찾기/바꾸기',
+              prefix: '앞에 문구 추가',
+              suffix: '뒤에 문구 추가',
+              numbering: '일련번호로 통일',
+              suggest: '🧹 추천 변경명',
+            }[m]
+          }}
         </label>
       </div>
 
@@ -105,11 +146,16 @@ async function onApply() {
       <div v-else-if="mode === 'prefix' || mode === 'suffix'" class="rename-view__inputs">
         <input v-model="text" type="text" placeholder="추가할 문구" />
       </div>
-      <div v-else class="rename-view__inputs rename-view__inputs--three">
+      <div v-else-if="mode === 'numbering'" class="rename-view__inputs rename-view__inputs--three">
         <input v-model="baseName" type="text" placeholder="기본 이름(비워두면 원래 이름 유지)" />
         <input v-model.number="start" type="number" min="0" placeholder="시작 번호" />
         <input v-model.number="digits" type="number" min="1" max="6" placeholder="자릿수" />
       </div>
+      <p v-else class="rename-view__suggest-hint">
+        "(1)", "복사본", "사본" 같은 의미 없는 복사 흔적만 규칙 기반으로 지웁니다(AI 불필요, 즉시
+        결과). "_v2"/"_final"/"_초안"처럼 서로 다른 문서를 구분하는 표시는 지우지 않습니다. 정리한
+        이름이 같은 폴더의 다른 파일과 겹치면 그 파일은 건드리지 않습니다.
+      </p>
 
       <table v-if="rows.length" class="rename-view__table">
         <thead>
@@ -170,7 +216,8 @@ async function onApply() {
 
 .rename-view__mode {
   display: flex;
-  gap: var(--space-5);
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
   margin-bottom: var(--space-4);
   font-size: var(--text-sm);
 
@@ -200,6 +247,15 @@ async function onApply() {
     border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-md);
   }
+}
+
+.rename-view__suggest-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-accent-soft);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-5);
 }
 
 .rename-view__table {

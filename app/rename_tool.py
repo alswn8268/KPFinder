@@ -7,6 +7,8 @@
 """
 
 import os
+import re
+from collections import defaultdict
 
 from app.scanner import FileEntry
 
@@ -16,6 +18,73 @@ MODE_SUFFIX = "suffix"
 MODE_NUMBERING = "numbering"
 
 MODES = (MODE_FIND_REPLACE, MODE_PREFIX, MODE_SUFFIX, MODE_NUMBERING)
+
+# "복사본"류 접미사만 지운다 — "_v2"/"_final"/"_초안"처럼 서로 다른 파일을 구분하는
+# 의미 있는 버전 표시는 건드리지 않는다(지우면 서로 다른 문서가 같은 이름이 될 수 있음).
+_COPY_SUFFIX_PATTERNS = [
+    re.compile(r"\s*\(\d+\)\s*$"),
+    re.compile(r"[ _-]*복사본\s*$", re.IGNORECASE),
+    re.compile(r"[ _-]*사본\s*$", re.IGNORECASE),
+    re.compile(r"[ _-]*[Cc]opy\s*\d*\s*$"),
+]
+
+
+def _clean_stem(stem: str) -> str:
+    cleaned = stem
+    changed = True
+    while changed:
+        changed = False
+        for pat in _COPY_SUFFIX_PATTERNS:
+            new = pat.sub("", cleaned)
+            if new != cleaned:
+                cleaned = new
+                changed = True
+    cleaned = re.sub(r"[ _]{2,}", "_", cleaned).strip(" _-")
+    return cleaned or stem
+
+
+def suggest_clean_names(entries: list[FileEntry]) -> dict[str, str]:
+    """"(1)", "복사본", "사본", "copy" 같은 의미 없는 복사 흔적만 제거한 정리된 이름을
+    제안한다. {relative_path: 제안하는 새 파일명} — 바뀌는 파일만 포함한다.
+
+    정리한 이름이 같은 폴더의 다른 파일과 겹치면(원본이든 다른 제안이든) 그 파일은
+    건드리지 않고 원래 이름을 유지한다 — 이름 충돌로 서로 다른 문서가 뒤섞이지 않도록.
+    """
+    taken_by_dir: dict[str, set[str]] = defaultdict(set)
+    for e in entries:
+        folder = os.path.dirname(e.relative_path.replace("\\", "/"))
+        taken_by_dir[folder].add(e.name.casefold())
+
+    suggestions: dict[str, str] = {}
+    for e in sorted(entries, key=lambda e: e.relative_path):
+        folder = os.path.dirname(e.relative_path.replace("\\", "/"))
+        stem, ext = os.path.splitext(e.name)
+        new_name = f"{_clean_stem(stem)}{ext}"
+        if new_name == e.name:
+            continue
+        key = new_name.casefold()
+        if key in taken_by_dir[folder] and key != e.name.casefold():
+            continue  # 정리하면 같은 폴더의 다른 파일과 이름이 겹친다 — 건드리지 않는다
+        suggestions[e.relative_path] = new_name
+        taken_by_dir[folder].discard(e.name.casefold())
+        taken_by_dir[folder].add(key)
+    return suggestions
+
+
+def build_suggested_rename_assignments(entries: list[FileEntry]) -> dict[str, dict]:
+    """suggest_clean_names 결과를 이동 계획용 assignments 형태로 만든다."""
+    suggestions = suggest_clean_names(entries)
+    result = {}
+    for rel_path, new_name in suggestions.items():
+        folder = os.path.dirname(rel_path.replace("\\", "/"))
+        dst = f"{folder}/{new_name}" if folder else new_name
+        result[rel_path] = {
+            "dst": dst,
+            "reason": "복사본/사본 표시 등 불필요한 이름 흔적 제거",
+            "confidence": "보통",
+            "source": "rename_suggest",
+        }
+    return result
 
 
 def _new_stem(stem: str, rule: dict) -> str:

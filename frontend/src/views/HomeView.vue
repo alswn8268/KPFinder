@@ -90,7 +90,7 @@ function playConfetti() {
     <section class="home__hero">
       <h1>업무 폴더를 안전하게 정리하세요</h1>
       <p>
-        문서 내용은 이 PC에서만 처리됩니다. 사용자가 최종 승인하기 전에는 어떤 파일도
+        문서 내용은 이 PC에서만 처리됩니다. <br/> 사용자가 최종 승인하기 전에는 어떤 파일도
         이동하거나 삭제하지 않습니다.
       </p>
     </section>
@@ -206,11 +206,6 @@ function playConfetti() {
 }
 
 .home__hero {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-6);
-  flex-wrap: wrap;
   animation: home-in 0.55s var(--ease-out) both;
 
   h1 {

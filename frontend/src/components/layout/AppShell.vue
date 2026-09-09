@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 
 import EnvDetailModal from '@/components/env/EnvDetailModal.vue'
 import EnvSummaryStrip from '@/components/env/EnvSummaryStrip.vue'
@@ -8,20 +8,34 @@ import SideNav from '@/components/layout/SideNav.vue'
 import StepIndicator from '@/components/layout/StepIndicator.vue'
 import ToastHost from '@/components/base/ToastHost.vue'
 import UsageGuideModal from '@/components/layout/UsageGuideModal.vue'
+import { useClassificationStore } from '@/stores/classification'
 import { useEnvStore } from '@/stores/env'
+import { useScanStore } from '@/stores/scan'
 import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()
 const { pointColor } = storeToRefs(ui)
 const env = useEnvStore()
+const scan = useScanStore()
+const classification = useClassificationStore()
 const showGuide = ref(false)
 const showEnvDetail = ref(false)
 
 const PRESET_COLORS = ['#5B4FE9', '#0EA5A0', '#E8515A', '#2563EB', '#D97706']
 
 onMounted(() => {
-  env.check()
+  env.check(scan.root, classification.model)
 })
+
+// "AI 모델" 상태는 사용자가 분류 화면에서 실제로 고른 모델을 반영해야 한다 — 항상
+// 기본 모델(exaone3.5:2.4b)만 확인하면, 사양이 낮아 더 작은 모델을 고른 사용자에게는
+// 엉뚱한 모델의 설치 여부를 보여주게 된다. 모델이 바뀔 때마다 다시 확인한다.
+watch(
+  () => classification.model,
+  (model) => {
+    if (model) env.check(scan.root, model)
+  },
+)
 
 function onColorInput(e: Event) {
   ui.setPointColor((e.target as HTMLInputElement).value)
@@ -31,13 +45,13 @@ function onColorInput(e: Event) {
 <template>
   <div class="app-shell">
     <aside class="app-shell__sidebar">
-      <div class="app-shell__brand">
-        <span class="app-shell__logo" aria-hidden="true">📁</span>
+      <RouterLink to="/" class="app-shell__brand">
+        <img class="app-shell__logo" src="/favicon.svg" alt="" aria-hidden="true" width="32" height="32" />
         <div>
           <p class="app-shell__title">KPFinder</p>
           <p class="app-shell__subtitle">AI 폴더 정리 도우미 · 로컬 문서 정리</p>
         </div>
-      </div>
+      </RouterLink>
       <SideNav />
 
       <div class="app-shell__color-picker">
@@ -118,10 +132,20 @@ function onColorInput(e: Event) {
   gap: var(--space-3);
   padding: var(--space-5) var(--space-4);
   border-bottom: 1px solid var(--color-border);
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-out);
+
+  &:hover {
+    background: var(--color-neutral-soft);
+  }
 }
 
 .app-shell__logo {
-  font-size: 26px;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
 }
 
 .app-shell__title {

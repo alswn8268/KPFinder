@@ -4,14 +4,16 @@ import { onMounted } from 'vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseBadge from '@/components/base/BaseBadge.vue'
 import { ENV_STATUS_TONE } from '@/constants/status'
+import { useClassificationStore } from '@/stores/classification'
 import { useEnvStore } from '@/stores/env'
 import { useScanStore } from '@/stores/scan'
 
 const env = useEnvStore()
 const scan = useScanStore()
+const classification = useClassificationStore()
 
 onMounted(() => {
-  if (!env.checked) env.check(scan.root)
+  if (!env.checked) env.check(scan.root, classification.model)
 })
 </script>
 
@@ -19,7 +21,12 @@ onMounted(() => {
   <div class="env-panel">
     <div class="env-panel__header">
       <p class="env-panel__hint">문제가 있는 항목만 조치하면 됩니다. AI 관련 항목이 오류여도 규칙 기반 기능은 그대로 씁니다.</p>
-      <BaseButton variant="secondary" size="sm" :loading="env.checking" @click="env.check(scan.root)">
+      <BaseButton
+        variant="secondary"
+        size="sm"
+        :loading="env.checking"
+        @click="env.check(scan.root, classification.model)"
+      >
         다시 확인
       </BaseButton>
     </div>

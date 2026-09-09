@@ -17,6 +17,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import networkx as nx
 
+from app.content_graph import MAX_NODES_FOR_GRAPH, GraphTooLargeError
 from app.plotting import apply_korean_font
 from app.relatedness import build_relatedness_edges
 from app.scanner import FileEntry
@@ -98,7 +99,15 @@ def render_directory_tree(entries: list[FileEntry]):
 
 
 def build_directory_relation_graph(entries: list[FileEntry], min_score: float = 0.4) -> nx.Graph:
-    """서로 다른 폴더에 있는 파일들의 내용 유사도를 폴더 단위로 평균 집계한 그래프."""
+    """서로 다른 폴더에 있는 파일들의 내용 유사도를 폴더 단위로 평균 집계한 그래프.
+
+    내부적으로 모든 파일 쌍을 비교(O(n^2))하므로, content_graph.py와 동일한 상한을 둔다.
+    """
+    if len(entries) > MAX_NODES_FOR_GRAPH:
+        raise GraphTooLargeError(
+            f"파일이 너무 많아({len(entries)}개) 폴더 연관도를 계산하지 않습니다. "
+            f"{MAX_NODES_FOR_GRAPH}개 이하일 때만 지원합니다."
+        )
     all_pairs = build_relatedness_edges(entries, min_score=0.0, exclude_exact_duplicates=True)
     pair_scores: dict[tuple[str, str], list[float]] = defaultdict(list)
     file_counts: dict[str, int] = defaultdict(int)

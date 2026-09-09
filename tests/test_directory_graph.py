@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 
+from app.content_graph import GraphTooLargeError, MAX_NODES_FOR_GRAPH
 from app.directory_graph import (
     ROOT_LABEL,
     build_directory_relation_graph,
@@ -56,3 +57,14 @@ def test_render_functions_return_figures():
     fig2 = render_directory_relation_graph(entries, min_score=0.99)
     assert fig1 is not None
     assert fig2 is not None
+
+
+def test_build_directory_relation_graph_raises_when_too_many_entries():
+    """content_graph.py와 같은 O(n^2) 계산이라 같은 상한이 있어야 한다 — 이전에는
+    이 가드가 빠져 있어 큰 폴더에서 요청이 그대로 멈춰버릴 수 있었다(회귀 방지)."""
+    entries = [_entry(f"폴더{i}/f.txt") for i in range(MAX_NODES_FOR_GRAPH + 1)]
+    try:
+        build_directory_relation_graph(entries)
+        assert False, "expected GraphTooLargeError"
+    except GraphTooLargeError:
+        pass

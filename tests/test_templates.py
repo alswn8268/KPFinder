@@ -50,6 +50,17 @@ def test_classify_by_rules_matches_summary_keyword():
     assert result["문서1.txt"]["dst"] == "04_계약·법무/문서1.txt"
 
 
+def test_classify_by_rules_org_rules_outrank_user_rules():
+    """모듈 docstring이 명시하는 우선순위(조직 고정 규칙 -> 사용자 지정 규칙)를 지킨다 —
+    같은 키워드를 서로 다른 폴더로 매핑하는 사용자 규칙이 있어도 조직 규칙이 이긴다."""
+    entries = [_entry("2026_예산_보고서.txt")]
+    user_rules = [{"keywords": ["예산"], "target": "99_미분류"}]
+
+    result = classify_by_rules(entries, default_template(), user_rules=user_rules)
+
+    assert result["2026_예산_보고서.txt"]["dst"] == "03_재무·회계/2026_예산_보고서.txt"
+
+
 def test_export_import_roundtrip():
     tmpl = OrgTemplate(name="테스트 템플릿", folders=[{"path": "A", "description": ""}])
     text = export_template(tmpl)

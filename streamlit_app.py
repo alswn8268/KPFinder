@@ -414,6 +414,7 @@ else:
             rename_tool.MODE_PREFIX: "앞에 문구 추가",
             rename_tool.MODE_SUFFIX: "뒤에 문구 추가",
             rename_tool.MODE_NUMBERING: "일련번호로 통일",
+            "suggest": "🧹 추천 변경명",
         }
         mode = st.radio(
             "변경 방식", list(mode_labels.keys()), format_func=lambda m: mode_labels[m],
@@ -432,9 +433,38 @@ else:
             rule["base_name"] = nc1.text_input("기본 이름(비워두면 원래 이름 유지)", key="rename_base")
             rule["start"] = nc2.number_input("시작 번호", min_value=0, value=1, key="rename_start")
             rule["digits"] = nc3.number_input("자릿수", min_value=1, max_value=6, value=3, key="rename_digits")
+        else:  # suggest
+            st.caption(
+                "\"(1)\", \"복사본\", \"사본\" 같은 의미 없는 복사 흔적만 규칙 기반으로 지웁니다"
+                "(AI 불필요, 즉시 결과). \"_v2\"/\"_final\"/\"_초안\"처럼 서로 다른 문서를 구분하는 "
+                "표시는 지우지 않고, 정리한 이름이 다른 파일과 겹치면 그 파일은 건드리지 않습니다."
+            )
+
+        def _rename_preview_rows():
+            if mode != "suggest":
+                return rename_tool.preview_rename(rename_targets, rule)
+            suggested = rename_tool.build_suggested_rename_assignments(rename_targets)
+            rows = []
+            for e in rename_targets:
+                info = suggested.get(e.relative_path)
+                rows.append(
+                    {
+                        "src": e.relative_path,
+                        "old_name": e.name,
+                        "new_name": info["dst"].rsplit("/", 1)[-1] if info else e.name,
+                        "dst": info["dst"] if info else e.relative_path,
+                        "changed": info is not None,
+                    }
+                )
+            return rows
+
+        def _rename_build_assignments():
+            if mode == "suggest":
+                return rename_tool.build_suggested_rename_assignments(rename_targets)
+            return rename_tool.build_rename_assignments(rename_targets, rule)
 
         if rename_targets:
-            preview_rows = rename_tool.preview_rename(rename_targets, rule)
+            preview_rows = _rename_preview_rows()
             changed_rows = [r for r in preview_rows if r["changed"]]
             preview_df = pd.DataFrame(
                 [{"기존 이름": r["old_name"], "새 이름": r["new_name"]} for r in preview_rows]
@@ -449,7 +479,7 @@ else:
                     "위 이름 변경 계획을 확인했으며, 실제로 적용하는 데 동의합니다.", key="rename_confirm"
                 )
                 if st.button("✂️ 이름 일괄 변경 적용", type="primary", disabled=not rename_confirm):
-                    rename_assignments = rename_tool.build_rename_assignments(rename_targets, rule)
+                    rename_assignments = _rename_build_assignments()
                     valid, rejected = validate_assignments(
                         entries, rename_assignments, st.session_state.scan_root
                     )
@@ -488,11 +518,14 @@ else:
             relation_threshold = st.slider(
                 "연관도 임계값", 0.1, 0.9, 0.4, 0.05, key="dir_relation_threshold"
             )
-            fig_relation = render_directory_relation_graph(entries, min_score=relation_threshold)
-            st.pyplot(fig_relation)
-            plt.close(fig_relation)
-            if not any(e.summary_status == "ok" for e in entries):
-                st.caption("아직 AI 분석 전이라 파일명 유사도만 반영되어 있습니다. AI 분석 후 더 정확해집니다.")
+            try:
+                fig_relation = render_directory_relation_graph(entries, min_score=relation_threshold)
+                st.pyplot(fig_relation)
+                plt.close(fig_relation)
+                if not any(e.summary_status == "ok" for e in entries):
+                    st.caption("아직 AI 분석 전이라 파일명 유사도만 반영되어 있습니다. AI 분석 후 더 정확해집니다.")
+            except GraphTooLargeError as exc:
+                st.warning(str(exc))
 
     with tab_content_graph:
         st.caption(

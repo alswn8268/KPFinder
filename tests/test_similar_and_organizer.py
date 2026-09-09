@@ -120,3 +120,33 @@ def test_classify_entries_with_ai_skips_ollama_call_when_all_rule_matched(monkey
     assert result["assignments"]["주간회의록.txt"]["source"] == "rule"
     assert result["assignments"]["계약서_초안.txt"]["source"] == "rule"
     assert "AI 호출이 필요하지 않았습니다" in result["notes"]
+
+
+def test_classify_entries_rejects_ai_folder_outside_template(monkeypatch):
+    """templates.py 모듈 docstring/설계상 "AI가 매번 다른 이름의 폴더를 만들어내는 것을
+    막기 위해"가 핵심 원칙인데, propose_folder_structure에는 allowed_folders가 프롬프트
+    힌트로만 전달되고 실제로 강제되지 않는다. classify_entries가 응답을 직접 걸러야 한다."""
+
+    def fake_propose(*args, **kwargs):
+        return {
+            "categories": ["AI가_지어낸_폴더"],
+            "assignments": {
+                "이상한파일.txt": {
+                    "dst": "AI가_지어낸_폴더/이상한파일.txt",
+                    "reason": "AI 임의 판단",
+                    "confidence": "높음",
+                }
+            },
+            "notes": "",
+        }
+
+    monkeypatch.setattr(llm_client, "propose_folder_structure", fake_propose)
+
+    entry = _entry("이상한파일.txt")
+    entry.summary_status = "ok"
+    result = classify_entries([entry], default_template(), model="unused", use_ai=True)
+
+    dst = result["assignments"]["이상한파일.txt"]["dst"]
+    assert not dst.startswith("AI가_지어낸_폴더")
+    assert dst.startswith("99_미분류")
+    assert result["assignments"]["이상한파일.txt"]["source"] == "fallback"

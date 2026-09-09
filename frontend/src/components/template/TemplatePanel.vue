@@ -75,6 +75,22 @@ async function onFromFolderList() {
   }
 }
 
+const EXAMPLE_FOLDER_LIST = `# '#'으로 시작하는 줄은 주석이라 무시됩니다
+01_기획·전략
+02_인사·총무
+03_재무·회계
+04_계약·법무
+# '/'로 하위 폴더도 만들 수 있어요
+05_영업/국내
+05_영업/해외
+06_마케팅·홍보
+07_회의록`
+
+function onFillExample() {
+  folderListText.value = EXAMPLE_FOLDER_LIST
+  folderListName.value = folderListName.value.trim() || '내 템플릿'
+}
+
 async function onSave() {
   await template.persist()
   ui.pushToast('템플릿을 저장했습니다.', 'success')
@@ -137,6 +153,22 @@ async function onSave() {
     <BaseCard>
       <template #header>폴더 목록 직접 입력</template>
       <p class="muted">원하는 폴더 구조를 한 줄에 하나씩 직접 입력해서 템플릿으로 만들 수도 있습니다.</p>
+
+      <div class="template-panel__howto">
+        <p class="template-panel__howto-title">✏️ 작성 방법</p>
+        <ul>
+          <li>한 줄에 폴더 경로 하나씩 적습니다.</li>
+          <li>하위 폴더는 <code>상위/하위</code> 형식으로 씁니다(예: <code>영업/국내</code>).</li>
+          <li><code>#</code>으로 시작하는 줄은 주석으로 무시됩니다. 빈 줄도 무시됩니다.</li>
+          <li>분류되지 않는 파일을 담을 <code>99_미분류</code> 폴더는 없으면 자동으로 추가됩니다.</li>
+          <li>이렇게 만든 템플릿은 키워드 규칙이 비어 있어 처음엔 AI 분류에만 쓰입니다 — 아래
+            "저장"으로 남겨두고 필요하면 JSON을 내보내 규칙을 직접 추가할 수 있습니다.</li>
+        </ul>
+        <button type="button" class="template-panel__example-btn" @click="onFillExample">
+          예시로 채워보기
+        </button>
+      </div>
+
       <input v-model="folderListName" type="text" placeholder="새 템플릿 이름" />
       <textarea v-model="folderListText" rows="6" placeholder="01_경영지원&#10;02_인사&#10;영업/실적" />
       <BaseButton variant="secondary" size="sm" :disabled="!folderListText.trim()" @click="onFromFolderList">
@@ -172,6 +204,53 @@ async function onSave() {
 .muted {
   color: var(--color-text-tertiary);
   font-size: var(--text-xs);
+}
+
+.template-panel__howto {
+  background: var(--color-accent-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin: var(--space-3) 0;
+}
+
+.template-panel__howto-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-2);
+}
+
+.template-panel__howto ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-left: var(--space-5);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  list-style: disc;
+}
+
+.template-panel__howto code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--color-surface);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm, 4px);
+}
+
+.template-panel__example-btn {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-accent-600);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-accent-400);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  transition: background-color var(--duration-fast) var(--ease-out);
+
+  &:hover {
+    background: var(--color-accent-100);
+  }
 }
 
 .template-panel__folders {

@@ -37,6 +37,12 @@ def _save_versions(root: str, versions: list[dict]) -> None:
 
 
 def record_version(root: str, log_path: str, note: str, files_moved: int) -> dict:
+    """적용 결과를 버전 이력에 남긴다.
+
+    files_moved가 0이면(계획한 파일이 모두 변경/누락 등으로 스킵됨) 이력에 남기지
+    않는다 — 되돌릴 것도 없는 빈 버전이 "가장 최근 버전"으로 남으면 그보다 앞선 실제
+    버전을 되돌리지 못하게 막아버리기 때문("더 최근 버전을 먼저 되돌려야 합니다").
+    """
     versions = list_versions(root)
     version = {
         "version_id": f"v{len(versions) + 1}",
@@ -46,8 +52,9 @@ def record_version(root: str, log_path: str, note: str, files_moved: int) -> dic
         "log_path": log_path,
         "restored": False,
     }
-    versions.append(version)
-    _save_versions(root, versions)
+    if files_moved > 0:
+        versions.append(version)
+        _save_versions(root, versions)
     return version
 
 

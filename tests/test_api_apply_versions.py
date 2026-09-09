@@ -50,24 +50,35 @@ def test_restore_blocked_when_later_version_unrestored(client, sample_folder):
     entries = _scan(client, sample_folder)
     template = client.get("/api/templates/default").json()
 
-    def apply_once():
-        classify = client.post(
-            "/api/classify",
-            json={"entries": entries, "template": template, "model": "unused", "use_ai": False},
-        ).json()
-        validate = client.post(
-            "/api/assignments/validate",
-            json={"entries": entries, "root": sample_folder, "assignments": classify["assignments"]},
-        ).json()
-        return client.post(
-            "/api/apply",
-            json={"root": sample_folder, "assignments": validate["merged"], "entries": entries},
-        ).json()
+    classify = client.post(
+        "/api/classify",
+        json={"entries": entries, "template": template, "model": "unused", "use_ai": False},
+    ).json()
+    validate = client.post(
+        "/api/assignments/validate",
+        json={"entries": entries, "root": sample_folder, "assignments": classify["assignments"]},
+    ).json()
+    first = client.post(
+        "/api/apply",
+        json={"root": sample_folder, "assignments": validate["merged"], "entries": entries},
+    ).json()
+    assert first["moved_count"] > 0
 
-    first = apply_once()
-    # 두 번째 적용은 이미 옮겨진 파일이라 계획이 비어 있을 수 있으므로, 버전 자체는
-    # record_version이 항상 새로 기록한다는 점만 확인하면 충분하다.
-    second = apply_once()
+    # 두 번째 버전은 방금 옮겨진 파일을 다른 폴더로 한 번 더 옮겨 만든다(실제로 파일이
+    # 이동해야 버전이 기록된다 — 같은 목적지로 재적용하면 0건이라 기록되지 않는다).
+    entries_after_first = _scan(client, sample_folder)
+    moved_entry = next(
+        e for e in entries_after_first if e["relative_path"].replace("\\", "/").startswith("08_회의록/")
+    )
+    second = client.post(
+        "/api/apply",
+        json={
+            "root": sample_folder,
+            "assignments": {moved_entry["relative_path"]: {"dst": f"90_보관/{moved_entry['name']}"}},
+            "entries": entries_after_first,
+        },
+    ).json()
+    assert second["moved_count"] > 0
     assert second["version"]["version_id"] != first["version"]["version_id"]
 
     versions = client.get("/api/versions", params={"root": sample_folder}).json()

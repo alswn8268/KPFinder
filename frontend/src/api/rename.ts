@@ -16,3 +16,11 @@ export async function buildRenameAssignments(
   )
   return data.assignments
 }
+
+export async function suggestRenameAssignments(entries: FileEntry[]): Promise<Record<string, AssignmentInfo>> {
+  const { data } = await apiClient.post<{ assignments: Record<string, AssignmentInfo> }>(
+    '/rename/suggest',
+    { entries },
+  )
+  return data.assignments
+}

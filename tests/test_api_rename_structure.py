@@ -35,6 +35,20 @@ def test_rename_preview_rejects_unknown_mode(client, sample_folder):
     assert resp.status_code == 400
 
 
+def test_rename_suggest_returns_cleaned_names(client, tmp_path):
+    (tmp_path / "보고서_복사본.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "계약서.txt").write_text("y", encoding="utf-8")
+    entries = _scan(client, str(tmp_path))
+
+    resp = client.post("/api/rename/suggest", json={"entries": entries})
+    assert resp.status_code == 200
+    assignments = resp.json()["assignments"]
+
+    assert assignments["보고서_복사본.txt"]["dst"] == "보고서.txt"
+    assert assignments["보고서_복사본.txt"]["source"] == "rename_suggest"
+    assert "계약서.txt" not in assignments
+
+
 def test_structure_copy_creates_only_folders_no_files(client, tmp_path):
     src = tmp_path / "src"
     (src / "영업" / "실적").mkdir(parents=True)

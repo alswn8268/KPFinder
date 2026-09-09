@@ -243,6 +243,10 @@ class RenameAssignmentsResponse(BaseModel):
     assignments: dict[str, AssignmentInfo]
 
 
+class RenameSuggestRequest(BaseModel):
+    entries: list[FileEntryModel]
+
+
 # ---- 이동 계획 / 적용 / 되돌리기 ----
 
 
