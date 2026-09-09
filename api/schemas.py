@@ -363,15 +363,25 @@ class StructureCopyResponse(BaseModel):
 # ---- 샘플 데이터 ----
 
 
+class SampleDatasetInfo(BaseModel):
+    key: str
+    label: str
+    description: str
+    output_dir: str
+
+
 class SampleDataRequest(BaseModel):
     output_dir: str | None = None
     force: bool = False
+    dataset: str = "general_office"
 
 
 class SampleDataResponse(BaseModel):
     output_dir: str
     created_count: int
     already_existed: bool
+    dataset: str
+    label: str
 
 
 # ---- 정보 ----

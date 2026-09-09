@@ -11,6 +11,11 @@ export async function getDefaultTemplate(): Promise<OrgTemplate> {
   return data
 }
 
+export async function listSampleTemplates(): Promise<OrgTemplate[]> {
+  const { data } = await apiClient.get<OrgTemplate[]>('/templates/samples')
+  return data
+}
+
 export async function importTemplate(jsonText: string): Promise<OrgTemplate> {
   const { data } = await apiClient.post<OrgTemplate>('/templates/import', { json_text: jsonText })
   return data

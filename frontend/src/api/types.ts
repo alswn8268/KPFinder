@@ -201,6 +201,15 @@ export interface SampleDataResponse {
   output_dir: string
   created_count: number
   already_existed: boolean
+  dataset: string
+  label: string
+}
+
+export interface SampleDatasetInfo {
+  key: string
+  label: string
+  description: string
+  output_dir: string
 }
 
 export interface OllamaModelInfo {

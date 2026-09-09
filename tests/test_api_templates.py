@@ -5,6 +5,17 @@ def test_default_template(client):
     assert "99_미분류" in [f["path"] for f in data["folders"]]
 
 
+def test_sample_templates_cover_dev_ops_finance(client):
+    resp = client.get("/api/templates/samples")
+    assert resp.status_code == 200
+    data = resp.json()
+    names = {t["name"] for t in data}
+    assert names == {"개발팀 표준 템플릿", "운영팀 표준 템플릿", "회계팀 표준 템플릿"}
+    for t in data:
+        assert "99_미분류" in [f["path"] for f in t["folders"]]
+        assert len(t["keyword_rules"]) > 0
+
+
 def test_import_export_round_trip(client):
     default = client.get("/api/templates/default").json()
     exported = client.post("/api/templates/export", json=default)

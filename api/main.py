@@ -34,7 +34,7 @@ from api.routers import (
     versions,
 )
 
-app = FastAPI(title="AI 폴더 정리 도우미 API", version="2.0.0")
+app = FastAPI(title="KPFinder API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,

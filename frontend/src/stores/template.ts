@@ -4,6 +4,7 @@ import { ref } from 'vue'
 import {
   getDefaultTemplate,
   importTemplate,
+  listSampleTemplates,
   listTemplates,
   saveTemplate,
   templateFromCurrentStructure,
@@ -14,6 +15,7 @@ import type { FileEntry, OrgTemplate } from '@/api/types'
 export const useTemplateStore = defineStore('template', () => {
   const active = ref<OrgTemplate | null>(null)
   const saved = ref<OrgTemplate[]>([])
+  const samples = ref<OrgTemplate[]>([])
   const loading = ref(false)
 
   async function loadDefault() {
@@ -24,6 +26,11 @@ export const useTemplateStore = defineStore('template', () => {
   async function refreshSaved() {
     saved.value = await listTemplates()
     return saved.value
+  }
+
+  async function loadSamples() {
+    samples.value = await listSampleTemplates()
+    return samples.value
   }
 
   async function importFromJson(jsonText: string) {
@@ -54,9 +61,11 @@ export const useTemplateStore = defineStore('template', () => {
   return {
     active,
     saved,
+    samples,
     loading,
     loadDefault,
     refreshSaved,
+    loadSamples,
     importFromJson,
     fromCurrentStructure,
     fromFolderList,

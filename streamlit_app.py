@@ -1,4 +1,4 @@
-"""AI 폴더 정리 도우미 — Streamlit 데모 앱.
+"""KPFinder(AI 폴더 정리 도우미) — Streamlit 데모 앱.
 
 흐름: 환경 점검 -> 스캔 -> (검색/그래프 탐색) -> 규칙+AI 분류 -> 사람이 파일별로 검토/수정
 -> 최종 상태 미리보기 -> (승인 시) 적용.
@@ -36,10 +36,11 @@ from app.scanner import compute_hashes, find_duplicate_groups, scan_folder
 from app.search import search_entries
 from app.similar import find_similar_documents
 from app.version_history import can_restore, list_versions, mark_restored, record_version
-from sample_data.generate_sample_data import OUTPUT_DEFAULT as SAMPLE_DATA_OUTPUT_DEFAULT
+from sample_data import generate_sample_data as sample_datasets
 from sample_data.generate_sample_data import generate as generate_sample_data
+from sample_data.org_templates import SAMPLE_TEMPLATES
 
-st.set_page_config(page_title="AI 폴더 정리 도우미", layout="wide")
+st.set_page_config(page_title="KPFinder", layout="wide")
 
 for key, default in (
     ("entries", []),
@@ -55,7 +56,8 @@ for key, default in (
     if key not in st.session_state:
         st.session_state[key] = default
 
-st.title("📁 AI 폴더 정리 도우미")
+st.title("📁 KPFinder")
+st.caption("AI 폴더 정리 도우미")
 st.caption(
     "환경 점검 → 스캔 → 규칙/AI 분류 → 사람이 확인·수정 → 적용. "
     "AI는 절대 자동으로 파일을 옮기지 않으며, 모든 처리는 로컬에서만 이루어집니다."
@@ -109,25 +111,35 @@ with st.sidebar:
 
     with st.expander("🧪 시연용 샘플 데이터"):
         st.caption(
-            "이름 규칙이 제각각인 문서 30여 개와 완전 중복 파일 4개를 포함한 어질러진 폴더를 "
-            "한 번에 만듭니다. 이미 있는 폴더는 덮어쓰지 않습니다."
+            "이름 규칙이 제각각인 문서와 완전 중복 파일을 포함한 어질러진 폴더를 한 번에 "
+            "만듭니다. 부서별로 다른 시나리오를 골라 만들 수 있고, 이미 있는 폴더는 "
+            "덮어쓰지 않습니다."
         )
+        dataset_options = list(sample_datasets.DATASETS.keys())
+        dataset_key = st.selectbox(
+            "시연 시나리오",
+            options=dataset_options,
+            format_func=lambda k: sample_datasets.DATASETS[k]["label"],
+            key="sample_dataset_key",
+        )
+        st.caption(sample_datasets.DATASETS[dataset_key]["description"])
+        output_dir = sample_datasets.DATASETS[dataset_key]["output_dir"]
         if st.button("샘플 데이터 만들기", use_container_width=True):
-            already_existed = os.path.exists(SAMPLE_DATA_OUTPUT_DEFAULT)
-            created = generate_sample_data(SAMPLE_DATA_OUTPUT_DEFAULT)
+            already_existed = os.path.exists(output_dir)
+            created = generate_sample_data(output_dir, dataset=dataset_key)
             if already_existed and created == 0:
-                st.session_state["_sample_already_exists"] = True
+                st.session_state["_sample_already_exists"] = output_dir
             else:
-                st.session_state["_sample_already_exists"] = False
-                st.session_state["folder_path_input"] = SAMPLE_DATA_OUTPUT_DEFAULT
+                st.session_state["_sample_already_exists"] = None
+                st.session_state["folder_path_input"] = output_dir
                 st.success(f"시연용 샘플 폴더를 만들었습니다 ({created}개 파일).")
                 st.rerun()
-        if st.session_state.get("_sample_already_exists"):
+        if st.session_state.get("_sample_already_exists") == output_dir:
             st.warning("이미 샘플 폴더가 있습니다. 다시 만들려면 아래 버튼을 눌러 덮어쓰세요.")
             if st.button("덮어쓰고 다시 만들기", use_container_width=True):
-                created = generate_sample_data(SAMPLE_DATA_OUTPUT_DEFAULT, force=True)
-                st.session_state["_sample_already_exists"] = False
-                st.session_state["folder_path_input"] = SAMPLE_DATA_OUTPUT_DEFAULT
+                created = generate_sample_data(output_dir, force=True, dataset=dataset_key)
+                st.session_state["_sample_already_exists"] = None
+                st.session_state["folder_path_input"] = output_dir
                 st.success(f"시연용 샘플 폴더를 다시 만들었습니다 ({created}개 파일).")
                 st.rerun()
 
@@ -193,6 +205,15 @@ with st.sidebar:
         template = st.session_state.template
         st.caption(f"현재 템플릿: **{template.name}** (버전 {template.version})")
         st.code("\n".join(f["path"] for f in template.folders), language="text")
+
+        st.caption("🏢 부서별 샘플 템플릿 (클릭 한 번으로 적용)")
+        for key, entry in SAMPLE_TEMPLATES.items():
+            if st.button(entry["label"], use_container_width=True, key=f"sample_template_{key}"):
+                st.session_state.template = entry["template"]
+                st.success(f"'{entry['label']}'을(를) 적용했습니다.")
+                st.rerun()
+            st.caption(entry["description"])
+
         uploaded = st.file_uploader("템플릿 JSON 가져오기", type=["json"], key="template_upload")
         if uploaded is not None:
             try:

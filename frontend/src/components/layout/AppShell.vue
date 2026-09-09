@@ -29,8 +29,8 @@ function onColorInput(e: Event) {
       <div class="app-shell__brand">
         <span class="app-shell__logo" aria-hidden="true">📁</span>
         <div>
-          <p class="app-shell__title">AI 폴더 정리 도우미</p>
-          <p class="app-shell__subtitle">로컬 문서 정리 · 안전한 이동</p>
+          <p class="app-shell__title">KPFinder</p>
+          <p class="app-shell__subtitle">AI 폴더 정리 도우미 · 로컬 문서 정리</p>
         </div>
       </div>
       <SideNav />

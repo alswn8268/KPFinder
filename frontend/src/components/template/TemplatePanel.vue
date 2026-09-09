@@ -20,6 +20,12 @@ const structureName = ref('')
 
 if (!template.active) template.loadDefault()
 template.refreshSaved()
+template.loadSamples()
+
+function onSelectSample(t: (typeof template.samples)[number]) {
+  template.selectSaved(t)
+  ui.pushToast(`샘플 템플릿 '${t.name}'을(를) 적용했습니다.`, 'success')
+}
 
 async function onLoadDefault() {
   await template.loadDefault()
@@ -88,6 +94,28 @@ async function onSave() {
         <BaseButton variant="secondary" size="sm" @click="onLoadDefault">기본 템플릿으로 되돌리기</BaseButton>
         <BaseButton variant="secondary" size="sm" @click="onExport">내보내기(JSON 다운로드)</BaseButton>
         <BaseButton variant="secondary" size="sm" @click="onSave">저장</BaseButton>
+      </div>
+    </BaseCard>
+
+    <BaseCard v-if="template.samples.length">
+      <template #header>🏢 부서별 샘플 템플릿</template>
+      <p class="muted template-panel__samples-intro">
+        시연용으로 미리 만들어 둔 부서별 표준 폴더 체계입니다. 클릭 한 번으로 현재
+        템플릿으로 적용해 볼 수 있습니다.
+      </p>
+      <div class="template-panel__samples">
+        <button
+          v-for="t in template.samples"
+          :key="t.name"
+          type="button"
+          class="template-panel__sample-card"
+          :class="{ 'template-panel__sample-card--active': template.active?.name === t.name }"
+          @click="onSelectSample(t)"
+        >
+          <strong>{{ t.name }}</strong>
+          <span class="template-panel__sample-count">{{ t.folders.length }}개 폴더 · 규칙 {{ t.keyword_rules.length }}개</span>
+          <span class="template-panel__sample-folders">{{ t.folders.slice(0, 4).map((f) => f.path).join(' · ') }}…</span>
+        </button>
       </div>
     </BaseCard>
 
@@ -176,6 +204,54 @@ textarea {
   font-family: var(--font-mono);
   font-size: 13px;
   resize: vertical;
+}
+
+.template-panel__samples-intro {
+  margin-bottom: var(--space-3);
+}
+
+.template-panel__samples {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+
+.template-panel__sample-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  transition: border-color var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+
+  strong {
+    font-size: var(--text-sm);
+  }
+
+  &:hover {
+    border-color: var(--color-accent-400);
+    transform: translateY(-1px);
+  }
+
+  &--active {
+    border-color: var(--color-accent-500);
+    background: var(--color-accent-soft);
+  }
+}
+
+.template-panel__sample-count {
+  font-size: var(--text-xs);
+  color: var(--color-accent-600);
+}
+
+.template-panel__sample-folders {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .template-panel__saved {

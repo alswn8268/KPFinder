@@ -2,10 +2,11 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { generateSampleData } from '@/api/sampleData'
+import { generateSampleData, listSampleDatasets } from '@/api/sampleData'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import EnvCheckPanel from '@/components/env/EnvCheckPanel.vue'
+import type { SampleDatasetInfo } from '@/api/types'
 import { useScanStore } from '@/stores/scan'
 import { useTemplateStore } from '@/stores/template'
 import { useUiStore } from '@/stores/ui'
@@ -23,9 +24,18 @@ const excludeExtsText = ref('')
 const showAdvanced = ref(false)
 const generatingSample = ref(false)
 const sampleAlreadyExists = ref(false)
+const sampleDatasets = ref<SampleDatasetInfo[]>([])
+const selectedDataset = ref('general_office')
 
 if (!template.active) template.loadDefault()
 classification.loadDefaultModel()
+listSampleDatasets()
+  .then((list) => {
+    sampleDatasets.value = list
+  })
+  .catch(() => {
+    // 목록을 못 불러와도 기본값(general_office)으로 계속 진행 가능
+  })
 
 async function onScan() {
   if (!folderPath.value.trim()) {
@@ -46,7 +56,7 @@ async function onScan() {
 async function onGenerateSample(force = false) {
   generatingSample.value = true
   try {
-    const result = await generateSampleData(undefined, force)
+    const result = await generateSampleData(undefined, force, selectedDataset.value)
     if (result.already_existed) {
       sampleAlreadyExists.value = true
       folderPath.value = result.output_dir
@@ -55,7 +65,7 @@ async function onGenerateSample(force = false) {
     }
     sampleAlreadyExists.value = false
     folderPath.value = result.output_dir
-    ui.pushToast(`시연용 샘플 폴더를 만들었습니다 (${result.created_count}개 파일).`, 'success')
+    ui.pushToast(`'${result.label}' 시연용 샘플 폴더를 만들었습니다 (${result.created_count}개 파일).`, 'success')
   } finally {
     generatingSample.value = false
   }
@@ -114,9 +124,19 @@ async function onGenerateSample(force = false) {
         <BaseCard>
           <template #header>🧪 시연용 샘플 데이터</template>
           <p class="home__sample-desc">
-            이름 규칙이 제각각인 문서 30여 개와 완전 중복 파일 4개를 포함한 어질러진 폴더를
-            한 번에 만듭니다. 이미 있는 폴더는 덮어쓰지 않습니다.
+            이름 규칙이 제각각인 문서와 완전 중복 파일을 포함한 어질러진 폴더를 한 번에
+            만듭니다. 부서별로 다른 시나리오를 골라 만들 수 있고, 이미 있는 폴더는
+            덮어쓰지 않습니다.
           </p>
+          <div v-if="sampleDatasets.length" class="home__dataset-picker">
+            <label v-for="d in sampleDatasets" :key="d.key" class="home__dataset-option">
+              <input v-model="selectedDataset" type="radio" :value="d.key" name="sample-dataset" />
+              <span>
+                <strong>{{ d.label }}</strong>
+                <small>{{ d.description }}</small>
+              </span>
+            </label>
+          </div>
           <BaseButton variant="secondary" block :loading="generatingSample" @click="onGenerateSample(false)">
             샘플 데이터 만들기
           </BaseButton>
@@ -179,6 +199,48 @@ async function onGenerateSample(force = false) {
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
   margin-bottom: var(--space-4);
+}
+
+.home__dataset-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.home__dataset-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+
+  &:has(input:checked) {
+    border-color: var(--color-accent-500);
+    background: var(--color-accent-soft);
+  }
+
+  input {
+    margin-top: 3px;
+    accent-color: var(--color-accent-500);
+  }
+
+  span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  strong {
+    font-size: var(--text-xs);
+  }
+
+  small {
+    font-size: 11.5px;
+    color: var(--color-text-tertiary);
+  }
 }
 
 .home__sample-overwrite {

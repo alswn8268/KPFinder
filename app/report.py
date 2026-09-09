@@ -252,7 +252,7 @@ def build_html_report(
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>AI 폴더 정리 도우미 - 결과 리포트</title>
+<title>KPFinder - 결과 리포트</title>
 <style>
   :root {{ --accent: #5B4FE9; --accent-soft: #EEEBFF; --text: #1F2430; --border: #E4E7EC; }}
   body {{ font-family: "Noto Sans KR", "Malgun Gothic", sans-serif; color: var(--text);
@@ -268,7 +268,7 @@ def build_html_report(
 </style>
 </head>
 <body>
-  <h1>AI 폴더 정리 도우미 - 결과 리포트</h1>
+  <h1>KPFinder - 결과 리포트</h1>
   <p>이 문서는 브라우저에서 바로 열람하거나, 인쇄(Ctrl+P) → PDF로 저장해 보관할 수 있습니다.</p>
 
   <h2>기본 정보</h2>

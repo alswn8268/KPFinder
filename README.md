@@ -1,10 +1,11 @@
-# AI 폴더 정리 도우미
+# KPFinder
 
-![tests](https://github.com/alswn8268/test1/actions/workflows/tests.yml/badge.svg)
+![tests](https://github.com/alswn8268/KPFinder/actions/workflows/tests.yml/badge.svg)
 
-> 2026년 사내 AX 과제 해결 공모전 출품작 — 어질러진 업무 폴더를 스캔해서 조직 표준 규칙과 로컬 AI가
-> 더 깔끔한 폴더 구조를 **제안**하는 로컬 실행 도구입니다. **AI는 절대 자동으로 파일을 옮기지 않습니다.**
-> 항상 **환경 점검 → 스캔 → 규칙/AI 제안 → 사람이 파일별로 확인·수정 → 적용** 순서를 따릅니다.
+> **AI 폴더 정리 도우미** — 2026년 사내 AX 과제 해결 공모전 출품작. 어질러진 업무 폴더를 스캔해서
+> 조직 표준 규칙과 로컬 AI가 더 깔끔한 폴더 구조를 **제안**하는 로컬 실행 도구입니다.
+> **AI는 절대 자동으로 파일을 옮기지 않습니다.** 항상 **환경 점검 → 스캔 → 규칙/AI 제안 →
+> 사람이 파일별로 확인·수정 → 적용** 순서를 따릅니다.
 
 ## 핵심 원칙
 
@@ -53,11 +54,31 @@ AI 분석을 실행할수록(요약이 쌓일수록) 더 정확해집니다.
 
 ## 실행
 
+두 가지 UI 중 하나를 고를 수 있습니다. 기능은 동일하고, 백엔드 로직(`app/*.py`)도 그대로 공유합니다.
+
+### 방법 A. 웹 UI (FastAPI + Vue, 권장)
+
+```bash
+# 1) API 서버
+uvicorn api.main:app --reload --port 8000
+
+# 2) 프런트엔드 (다른 터미널에서)
+cd frontend
+npm install
+npm run dev   # http://localhost:5173
+```
+
+빌드해서 API 서버 하나로만 서빙하려면 `cd frontend && npm run build` 후 다시
+`uvicorn api.main:app --port 8000`을 실행하면 `frontend/dist`를 자동으로 함께 서빙합니다.
+
+### 방법 B. Streamlit (폴백)
+
 ```bash
 streamlit run streamlit_app.py
 ```
 
-브라우저에 열리는 화면에서:
+두 UI 모두 다음 흐름을 따릅니다(아래 설명은 Streamlit 기준 탭/사이드바 이름이며, 웹 UI는 좌측
+내비게이션의 같은 이름 메뉴에 대응합니다):
 
 1. 사이드바의 **🩺 실행 환경 점검**에서 Ollama 연결, 모델 설치 여부, 폴더 권한, 저장 공간 등을
    확인합니다. Ollama 관련 항목이 오류여도 나머지 기능은 계속 쓸 수 있습니다.
@@ -71,6 +92,9 @@ streamlit run streamlit_app.py
    파일만 요약해 AI에 보냅니다(비용 절감). Ollama가 꺼져 있으면 자동으로 규칙 기반만으로 진행됩니다.
    GPU 없는 PC에서는 AI 분석에 문단 하나당 약 40~80초가 걸릴 수 있으니, 시연 직전에 미리 한 번 돌려서
    캐시해 두는 것을 권장합니다(동일한 파일은 캐시되어 재분석 시 즉시 결과가 나옵니다).
+   - **PC 사양에 맞는 모델 선택**: 이 PC에 설치된 Ollama 모델을 용량이 작은 순서로 드롭다운에서
+     바로 고를 수 있습니다. 사양이 낮다면 가장 작은 모델을 고르거나, "AI 분류 사용" 체크를 꺼서
+     AI 호출 없이 규칙 기반으로만 계속 쓸 수 있습니다(두 옵션 모두 즉시 다시 켤 수 있습니다).
    - **✂️ 이름 일괄 변경** 탭에서는 찾기/바꾸기·접두사/접미사·일련번호 규칙으로 여러 파일의
      이름을 한 번에 바꿀 수 있습니다(같은 폴더 내 이동으로 처리되어 이동 계획과 동일한 안전성
      검사·자동 복구·되돌리기가 그대로 적용됩니다).
@@ -86,25 +110,44 @@ streamlit run streamlit_app.py
    이 작업은 **🕘 버전 관리** 탭에 새 버전으로 기록되며, 더 최근 버전부터 순서대로 되돌릴 수 있습니다
    (더 최근 버전이 남아 있으면 과거 버전 되돌리기 버튼이 비활성화됩니다).
 
-## 데모용 샘플 폴더 만들기
+## 데모용 샘플 데이터
 
-이름 규칙이 제각각인 문서 30여 개와 완전 중복 파일 4개를 포함한 어질러진 폴더를 생성합니다.
+이름 규칙이 제각각인 문서와 완전 중복 파일을 포함한 "어질러진 폴더"를 부서별로 4가지 시나리오
+중 골라 만들 수 있습니다. 웹 UI 홈 화면(또는 Streamlit 사이드바)의 **🧪 시연용 샘플 데이터**
+카드에서 시나리오를 고르고 버튼 한 번으로 만들 수 있고, CLI로도 동일하게 만들 수 있습니다.
 이미 존재하는 폴더는 `--force`를 붙이지 않으면 덮어쓰지 않습니다.
 
+| 시나리오 키 | 부서 | 특징 |
+|---|---|---|
+| `general_office` (기본) | 총무·영업·마케팅 혼재 | 부서 구분 없는 전형적인 공유폴더. 34개 파일, 완전 중복 4개 |
+| `dev_team` | 개발팀 | 기획/설계/API 문서, 배포·장애 대응, 스프린트 회의록. 22개 파일 |
+| `ops_team` | 운영팀 | 서비스 운영 현황, 장애 포스트모템, 모니터링/SLA 리포트. 21개 파일 |
+| `finance_team` | 회계팀 | 법인카드·경비 정산, 세금계산서, 급여, 결산 자료. 21개 파일 |
+
 ```bash
-python sample_data/generate_sample_data.py
-# 기본 출력 위치: sample_data/messy_folder
-python sample_data/generate_sample_data.py sample_data/messy_folder --force  # 다시 만들기
+python sample_data/generate_sample_data.py                              # 기본(general_office)
+python sample_data/generate_sample_data.py --dataset dev_team           # 개발팀 시나리오
+python sample_data/generate_sample_data.py --dataset dev_team --force   # 다시 만들기(덮어쓰기)
 ```
+
+각 부서 시나리오는 **같은 부서의 샘플 조직 템플릿**(아래)과 파일명이 맞춰져 있어, Ollama 없이
+규칙 기반 분류만으로도 대부분(부서에 따라 62~100%) 자동으로 정리되는 것을 시연할 수 있습니다.
+
+### 부서별 샘플 조직 템플릿
+
+개발팀/운영팀/회계팀 표준 폴더 체계를 미리 만들어 뒀습니다. 조직 표준 템플릿 화면(웹 UI:
+"조직 표준 템플릿" 메뉴, Streamlit: 사이드바 "🗂️ 조직 표준 템플릿")에서 카드를 클릭하면 바로
+현재 템플릿으로 적용됩니다. 코드로는 `sample_data/org_templates.py`의 `SAMPLE_TEMPLATES`에서
+확인할 수 있습니다.
 
 ## 프로젝트 구조
 
 ```
-streamlit_app.py          # Streamlit UI (환경점검 -> 스캔 -> 규칙/AI 분류 -> 제안 편집 -> 적용)
-app/
+streamlit_app.py          # Streamlit UI (환경점검 -> 스캔 -> 규칙/AI 분류 -> 제안 편집 -> 적용) — 폴백
+app/                       # 두 UI가 공유하는 핵심 백엔드 로직
   scanner.py               # 폴더 스캔, 해시 기반 완전 중복 탐지
   text_extractor.py         # .txt/.docx/.xlsx/.csv/.pptx/.pdf/.hwpx/.hwp 텍스트 추출
-  llm_client.py             # Ollama 로컬 LLM 연동 (요약, 신뢰도/이유 포함 폴더 구조 제안)
+  llm_client.py             # Ollama 로컬 LLM 연동 (요약, 신뢰도/이유 포함 폴더 구조 제안, 설치 모델 목록)
   templates.py              # 조직 표준 폴더 템플릿 + 규칙 기반 1차 분류
   organizer.py              # 요약 오케스트레이션 + 캐싱, 규칙+AI 결합 분류, assignments 검증
   path_safety.py            # 목적지 경로 안전성 검증(대상 폴더 이탈/절대경로/예약어/충돌 차단)
@@ -118,11 +161,18 @@ app/
   search.py                 # 파일명/경로/AI 요약 검색 및 확장자 필터
   version_history.py        # 적용된 정리 작업의 버전 기록/되돌리기 관리(순서 어긴 복구 차단)
   file_ops.py               # 이동 계획 사전 저장, 즉시 로깅, 자동 롤백, 되돌리기(undo)
-  report.py                 # 최종 상태 계산, Before/After 트리, JSON/엑셀 리포트
+  report.py                 # 최종 상태 계산, Before/After 트리, JSON/엑셀/HTML 리포트
   plotting.py               # matplotlib 그래프용 한글 폰트 설정 유틸
+api/                        # app/*.py를 감싸는 무상태 FastAPI 레이어 (Vue 프런트엔드용)
+  main.py                   # 진입점 (uvicorn api.main:app)
+  routers/                  # 도메인별 엔드포인트 (scan/classify/apply/versions/templates/sample-data 등)
+  schemas.py, serialization.py
+frontend/                   # Vite + Vue 3 + TypeScript + SCSS 웹 UI
+  src/views/, src/stores/, src/components/, src/api/
 sample_data/
-  generate_sample_data.py   # 데모용 샘플 폴더 생성 스크립트
-tests/                      # pytest 단위 테스트 + Streamlit AppTest 스모크 테스트 (Ollama 없이 실행 가능)
+  generate_sample_data.py   # 부서별(4종) 데모 샘플 폴더 생성 스크립트
+  org_templates.py          # 부서별(개발팀/운영팀/회계팀) 샘플 조직 템플릿
+tests/                      # pytest 단위 테스트 + API 테스트 + Streamlit AppTest 스모크 테스트 (Ollama 없이 실행 가능)
 .github/workflows/tests.yml # PR/푸시마다 pytest를 자동 실행하는 CI
 ```
 
@@ -156,6 +206,8 @@ PR과 푸시마다 GitHub Actions(`.github/workflows/tests.yml`)에서 동일한
   않은 백슬래시 이스케이프만 골라 고쳐서 재시도하는 복구 로직을 추가했습니다
   (`app/llm_client.py:_repair_invalid_escapes`, 회귀 테스트 포함).
 - Ollama 연결/모델 설치 상태가 사이드바(또는 홈 화면) 환경 점검에 정상으로 표시됨을 확인했습니다.
+- 설치된 Ollama 모델 목록(`GET /api/models`)이 용량순으로 조회되고, 분류 화면 드롭다운에
+  정상 반영되는 것을 실제 브라우저로 확인했습니다(`exaone3.5:2.4b`, 1.5GB).
 - 아래는 이번에 함께 확인하지 못해 시연 전 재확인을 권장하는 항목입니다: 한글 파일명이 매우 긴
   경우, HWP 포함 폴더, 이미지형 PDF 포함 폴더에서의 분류 결과.
 

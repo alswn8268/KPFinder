@@ -12,6 +12,7 @@ from api.schemas import (
     TemplateModel,
     TemplateSaveRequest,
 )
+from sample_data.org_templates import SAMPLE_TEMPLATES
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
@@ -24,6 +25,12 @@ def list_templates():
 @router.get("/default", response_model=TemplateModel)
 def get_default_template():
     return template_to_model(templates_module.default_template())
+
+
+@router.get("/samples", response_model=list[TemplateModel])
+def list_sample_templates():
+    """개발팀/운영팀/회계팀 등 부서별 샘플 템플릿 — 시연용."""
+    return [template_to_model(entry["template"]) for entry in SAMPLE_TEMPLATES.values()]
 
 
 @router.post("/import", response_model=TemplateModel)
