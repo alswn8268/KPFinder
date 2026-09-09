@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 
 import SideNav from '@/components/layout/SideNav.vue'
 import StepIndicator from '@/components/layout/StepIndicator.vue'
 import ToastHost from '@/components/base/ToastHost.vue'
+import UsageGuideModal from '@/components/layout/UsageGuideModal.vue'
 import { useEnvStore } from '@/stores/env'
 import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()
 const { pointColor } = storeToRefs(ui)
 const env = useEnvStore()
+const showGuide = ref(false)
 
 const PRESET_COLORS = ['#5B4FE9', '#0EA5A0', '#E8515A', '#2563EB', '#D97706']
 
@@ -57,11 +59,18 @@ function onColorInput(e: Event) {
     <div class="app-shell__main">
       <header class="app-shell__topbar">
         <StepIndicator />
-        <div class="app-shell__env-pill" :class="{ 'is-error': env.hasBlockingError }">
-          <span class="app-shell__env-dot" />
-          {{ env.ollamaConnected() ? 'AI 연결됨' : 'AI 없이 사용 중' }}
+        <div class="app-shell__topbar-right">
+          <button class="app-shell__guide-btn" @click="showGuide = true">
+            <span aria-hidden="true">❓</span> 사용 가이드
+          </button>
+          <div class="app-shell__env-pill" :class="{ 'is-error': env.hasBlockingError }">
+            <span class="app-shell__env-dot" />
+            {{ env.ollamaConnected() ? 'AI 연결됨' : 'AI 없이 사용 중' }}
+          </div>
         </div>
       </header>
+
+      <UsageGuideModal v-model="showGuide" />
 
       <main class="app-shell__content">
         <RouterView v-slot="{ Component }">
@@ -184,6 +193,38 @@ function onColorInput(e: Event) {
   z-index: 10;
 }
 
+.app-shell__topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.app-shell__guide-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-strong);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+
+  &:hover {
+    border-color: var(--color-accent-400);
+    color: var(--color-accent-600);
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: scale(0.96);
+  }
+}
+
 .app-shell__env-pill {
   display: inline-flex;
   align-items: center;
@@ -198,10 +239,32 @@ function onColorInput(e: Event) {
   height: 7px;
   border-radius: 50%;
   background: var(--color-success);
+  animation: env-dot-pulse 2.2s var(--ease-in-out) infinite;
 }
 
 .app-shell__env-pill.is-error .app-shell__env-dot {
   background: var(--color-warning);
+  animation-name: env-dot-pulse-warn;
+}
+
+@keyframes env-dot-pulse-warn {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--color-warning-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
+@keyframes env-dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--color-success-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 4px transparent;
+  }
 }
 
 .app-shell__content {

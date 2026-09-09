@@ -95,6 +95,7 @@ const toolLinks = computed(() => [
       width: 3px;
       border-radius: var(--radius-full);
       background: var(--color-accent-500);
+      animation: nav-indicator-in var(--duration-base) var(--ease-out) both;
     }
   }
 
@@ -107,5 +108,16 @@ const toolLinks = computed(() => [
   font-size: 15px;
   width: 18px;
   text-align: center;
+}
+
+@keyframes nav-indicator-in {
+  from {
+    opacity: 0;
+    transform: scaleY(0.3);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
 }
 </style>

@@ -6,6 +6,7 @@ import { generateSampleData, listSampleDatasets } from '@/api/sampleData'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import EnvCheckPanel from '@/components/env/EnvCheckPanel.vue'
+import EnvSummaryStrip from '@/components/env/EnvSummaryStrip.vue'
 import type { SampleDatasetInfo } from '@/api/types'
 import { useScanStore } from '@/stores/scan'
 import { useTemplateStore } from '@/stores/template'
@@ -26,6 +27,7 @@ const generatingSample = ref(false)
 const sampleAlreadyExists = ref(false)
 const sampleDatasets = ref<SampleDatasetInfo[]>([])
 const selectedDataset = ref('general_office')
+const justGenerated = ref(false)
 
 if (!template.active) template.loadDefault()
 classification.loadDefaultModel()
@@ -66,35 +68,78 @@ async function onGenerateSample(force = false) {
     sampleAlreadyExists.value = false
     folderPath.value = result.output_dir
     ui.pushToast(`'${result.label}' 시연용 샘플 폴더를 만들었습니다 (${result.created_count}개 파일).`, 'success')
+    playConfetti()
   } finally {
     generatingSample.value = false
   }
+}
+
+// 폴더 경로 입력창 바로 아래 "테스트할 파일이 없나요?" 배너의 원클릭 버튼 — 현재 고른
+// 시나리오(기본값 general_office)로 즉시 샘플을 만들고, 성공하면 잠깐 색종이 효과로 보상감을 준다.
+async function onQuickStartSample() {
+  await onGenerateSample(false)
+}
+
+function playConfetti() {
+  justGenerated.value = false
+  requestAnimationFrame(() => {
+    justGenerated.value = true
+    window.setTimeout(() => {
+      justGenerated.value = false
+    }, 700)
+  })
 }
 </script>
 
 <template>
   <div class="home">
     <section class="home__hero">
-      <h1>업무 폴더를 안전하게 정리하세요</h1>
-      <p>
-        문서 내용은 이 PC에서만 처리됩니다. 사용자가 최종 승인하기 전에는 어떤 파일도
-        이동하거나 삭제하지 않습니다.
-      </p>
+      <div class="home__hero-text">
+        <h1>업무 폴더를 안전하게 정리하세요</h1>
+        <p>
+          문서 내용은 이 PC에서만 처리됩니다. 사용자가 최종 승인하기 전에는 어떤 파일도
+          이동하거나 삭제하지 않습니다.
+        </p>
+      </div>
+      <EnvSummaryStrip class="home__hero-env" />
     </section>
 
     <div class="home__grid">
       <BaseCard class="home__scan-card">
         <template #header>1️⃣ 정리할 폴더 선택</template>
-        <div class="home__field">
-          <label for="folder-path">폴더 경로</label>
-          <input
-            id="folder-path"
-            v-model="folderPath"
-            type="text"
-            placeholder="예: C:\Users\me\Documents\업무폴더"
-            @keyup.enter="onScan"
-          />
+        <div class="home__field-wrap">
+          <div class="home__field" :class="{ 'home__field--success': justGenerated }">
+            <label for="folder-path">폴더 경로</label>
+            <input
+              id="folder-path"
+              v-model="folderPath"
+              type="text"
+              placeholder="예: C:\Users\me\Documents\업무폴더"
+              @keyup.enter="onScan"
+            />
+          </div>
+          <Transition name="pop">
+            <span v-if="justGenerated" class="home__field-success" aria-hidden="true">
+              ✅ 준비 완료!
+              <span class="home__confetti">
+                <i v-for="n in 8" :key="n" :style="{ '--angle': `${n * 45}deg` }" />
+              </span>
+            </span>
+          </Transition>
         </div>
+
+        <Transition name="rise">
+          <div v-if="!folderPath.trim()" class="home__quickstart">
+            <span class="home__quickstart-icon" aria-hidden="true">🧪</span>
+            <div class="home__quickstart-text">
+              <strong>테스트할 파일이 없나요?</strong>
+              <span>시연용 샘플 데이터가 있습니다! 클릭 한 번으로 바로 체험해보세요.</span>
+            </div>
+            <BaseButton size="sm" variant="secondary" :loading="generatingSample" @click="onQuickStartSample">
+              샘플로 바로 시작
+            </BaseButton>
+          </div>
+        </Transition>
 
         <button class="home__advanced-toggle" @click="showAdvanced = !showAdvanced">
           {{ showAdvanced ? '고급 옵션 숨기기' : '고급 옵션 (제외 폴더/확장자)' }}
@@ -160,6 +205,17 @@ async function onGenerateSample(force = false) {
 </template>
 
 <style scoped lang="scss">
+@keyframes home-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .home {
   display: flex;
   flex-direction: column;
@@ -167,6 +223,13 @@ async function onGenerateSample(force = false) {
 }
 
 .home__hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+  animation: home-in 0.55s var(--ease-out) both;
+
   h1 {
     font-size: var(--text-2xl);
     background: linear-gradient(90deg, var(--color-text-primary), var(--color-accent-600));
@@ -182,17 +245,147 @@ async function onGenerateSample(force = false) {
   }
 }
 
+.home__hero-text {
+  flex: 1;
+  min-width: 260px;
+}
+
+.home__hero-env {
+  flex-shrink: 0;
+  padding-top: var(--space-1);
+}
+
 .home__grid {
   display: grid;
   grid-template-columns: 1.3fr 1fr;
   gap: var(--space-6);
   align-items: start;
+
+  > * {
+    animation: home-in 0.55s var(--ease-out) both;
+  }
+}
+
+.home__scan-card {
+  animation-delay: 0.06s;
 }
 
 .home__side {
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
+
+  > *:nth-child(1) {
+    animation: home-in 0.55s var(--ease-out) both;
+    animation-delay: 0.12s;
+  }
+  > *:nth-child(2) {
+    animation: home-in 0.55s var(--ease-out) both;
+    animation-delay: 0.18s;
+  }
+}
+
+.home__quickstart {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--color-accent-300);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+}
+
+.home__quickstart-icon {
+  font-size: 22px;
+  animation: quickstart-bob 2.4s var(--ease-in-out) infinite;
+}
+
+@keyframes quickstart-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-4px) rotate(-6deg);
+  }
+}
+
+.home__quickstart-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+
+  strong {
+    font-size: var(--text-sm);
+  }
+
+  span {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+}
+
+.home__quickstart-action {
+  position: relative;
+  flex-shrink: 0;
+
+  .base-btn {
+    animation: quickstart-glow 2.4s var(--ease-in-out) infinite;
+  }
+}
+
+@keyframes quickstart-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--color-accent-100);
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+.home__confetti {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+
+  i {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 6px;
+    height: 6px;
+    margin: -3px;
+    border-radius: 50%;
+    background: var(--color-accent-500);
+    transform: rotate(var(--angle)) translateY(0);
+    animation: confetti-burst 0.65s var(--ease-out) forwards;
+
+    &:nth-child(3n + 1) {
+      background: var(--color-success);
+    }
+    &:nth-child(3n + 2) {
+      background: var(--color-warning);
+    }
+  }
+}
+
+@keyframes confetti-burst {
+  0% {
+    transform: rotate(var(--angle)) translateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(var(--angle)) translateY(-30px);
+    opacity: 0;
+  }
 }
 
 .home__sample-desc {
@@ -215,11 +408,19 @@ async function onGenerateSample(force = false) {
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-spring, var(--ease-out));
+
+  &:hover {
+    transform: translateY(-1px);
+  }
 
   &:has(input:checked) {
     border-color: var(--color-accent-500);
     background: var(--color-accent-soft);
+    transform: scale(1.015);
   }
 
   input {
