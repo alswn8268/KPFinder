@@ -189,6 +189,38 @@ def template_from_ai_proposal(categories: list[str], name: str) -> OrgTemplate:
     return OrgTemplate(name=name, folders=folders, keyword_rules=[])
 
 
+def template_from_hybrid_proposal(
+    base_template: OrgTemplate, categories: list[str], name: str
+) -> OrgTemplate:
+    """기존 템플릿 폴더는 그대로 유지하면서 AI가 새로 제안한 카테고리만 추가한다.
+
+    app.organizer.suggest_structure_update()(하이브리드 모드) 결과를 템플릿에 반영할 때
+    쓴다. template_from_ai_proposal()과 달리 완전히 새로 만들지 않고 base_template.folders와
+    keyword_rules를 보존한다 — AI 응답이 기존 폴더를 빠뜨리고 새 카테고리만 돌려주더라도
+    기존 템플릿이 손상되지 않도록 하기 위함이다. categories가 비어 있어도(AI가 "지금 템플릿
+    으로 충분하다"고 판단한 경우) 에러를 내지 않고 base_template과 같은 폴더 구성을 그대로
+    돌려준다 — template_from_ai_proposal()과 달리 결과가 절대 "빈 템플릿"이 될 수 없다.
+    """
+    folders = [dict(f) for f in base_template.folders]
+    seen = {f["path"] for f in folders}
+
+    for raw in categories or []:
+        path = (raw or "").strip().strip("/\\")
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        folders.append({"path": path, "description": ""})
+
+    if not any(f["path"] == UNCLASSIFIED_FOLDER for f in folders):
+        folders.append({"path": UNCLASSIFIED_FOLDER, "description": "규칙/AI로 분류하지 못한 파일"})
+
+    return OrgTemplate(
+        name=name,
+        folders=folders,
+        keyword_rules=[dict(r) for r in base_template.keyword_rules],
+    )
+
+
 def duplicate_hint(entry: FileEntry) -> bool:
     name_lower = entry.name.lower()
     return any(kw.lower() in name_lower for kw in DUPLICATE_HINT_KEYWORDS)

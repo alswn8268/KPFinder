@@ -123,6 +123,8 @@ class SuggestStructureRequest(BaseModel):
     entries: list[FileEntryModel]
     model: str
     hint: str = ""
+    adjustment: str = ""
+    batch_size: int | None = None
 
 
 class SuggestStructureResponse(BaseModel):
@@ -131,7 +133,22 @@ class SuggestStructureResponse(BaseModel):
     notes: str
 
 
+class SuggestStructureUpdateRequest(BaseModel):
+    entries: list[FileEntryModel]
+    template: TemplateModel
+    model: str
+    hint: str = ""
+    adjustment: str = ""
+    batch_size: int | None = None
+
+
 class TemplateFromAiProposalRequest(BaseModel):
+    categories: list[str]
+    name: str
+
+
+class TemplateFromHybridProposalRequest(BaseModel):
+    template: TemplateModel
     categories: list[str]
     name: str
 

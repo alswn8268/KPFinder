@@ -11,7 +11,9 @@ from api.schemas import (
     AssignmentInfo,
     SuggestStructureRequest,
     SuggestStructureResponse,
+    SuggestStructureUpdateRequest,
     TemplateFromAiProposalRequest,
+    TemplateFromHybridProposalRequest,
     TemplateFromListRequest,
     TemplateFromStructureRequest,
     TemplateImportRequest,
@@ -79,10 +81,44 @@ def from_folder_list(req: TemplateFromListRequest):
 
 @router.post("/suggest", response_model=SuggestStructureResponse)
 def suggest_structure(req: SuggestStructureRequest):
-    """조직 템플릿과 무관하게 AI가 새 폴더 구조를 제안한다 — 검토용, 아직 템플릿이 아니다."""
+    """조직 템플릿과 무관하게 AI가 새 폴더 구조를 제안한다 — 검토용, 아직 템플릿이 아니다.
+
+    hint/adjustment로 "AI 제안 다시 받기"(카테고리 더 적게/많게)를 지원하고, 파일이 많으면
+    batch_size 기준으로 나눠 호출한 뒤 organizer가 결과를 합친다.
+    """
     entries = models_to_entries(req.entries)
     try:
-        result = organizer.suggest_new_structure(entries, req.model, hint=req.hint or None)
+        result = organizer.suggest_new_structure(
+            entries,
+            req.model,
+            hint=req.hint or None,
+            adjustment=req.adjustment or None,
+            batch_size=req.batch_size,
+        )
+    except OllamaError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    assignments = {src: AssignmentInfo(**info) for src, info in result["assignments"].items()}
+    return SuggestStructureResponse(
+        categories=result.get("categories", []),
+        assignments=assignments,
+        notes=result.get("notes", ""),
+    )
+
+
+@router.post("/suggest-update", response_model=SuggestStructureResponse)
+def suggest_structure_update(req: SuggestStructureUpdateRequest):
+    """하이브리드 모드 — 기존 템플릿 폴더를 우선 사용하되, 부족한 카테고리만 AI가 추가 제안한다."""
+    entries = models_to_entries(req.entries)
+    template = model_to_template(req.template)
+    try:
+        result = organizer.suggest_structure_update(
+            entries,
+            template,
+            req.model,
+            hint=req.hint or None,
+            adjustment=req.adjustment or None,
+            batch_size=req.batch_size,
+        )
     except OllamaError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     assignments = {src: AssignmentInfo(**info) for src, info in result["assignments"].items()}
@@ -99,4 +135,11 @@ def from_ai_proposal(req: TemplateFromAiProposalRequest):
         tmpl = templates_module.template_from_ai_proposal(req.categories, name=req.name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return template_to_model(tmpl)
+
+
+@router.post("/from-hybrid-proposal", response_model=TemplateModel)
+def from_hybrid_proposal(req: TemplateFromHybridProposalRequest):
+    base = model_to_template(req.template)
+    tmpl = templates_module.template_from_hybrid_proposal(base, req.categories, name=req.name)
     return template_to_model(tmpl)

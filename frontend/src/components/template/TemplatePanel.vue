@@ -99,6 +99,7 @@ async function onSave() {
 }
 
 const structureHint = ref('')
+const structureMode = ref<'free' | 'hybrid'>('free')
 const aiTemplateName = ref('AI 제안 템플릿')
 
 const suggestionRows = computed(() =>
@@ -107,10 +108,10 @@ const suggestionRows = computed(() =>
     : [],
 )
 
-async function onSuggestStructure() {
+function ensureReadyToSuggest(): boolean {
   if (!scan.hasScanned) {
     ui.pushToast('먼저 폴더를 스캔하세요.', 'warning')
-    return
+    return false
   }
   const summarizedCount = scan.entries.filter(
     (e) => e.summary_status === 'ok' || e.summary_status === 'empty',
@@ -120,13 +121,35 @@ async function onSuggestStructure() {
       '아직 요약된 파일이 없습니다. 먼저 분류를 한 번 실행해 파일 요약을 만든 뒤 다시 시도하세요.',
       'warning',
     )
-    return
+    return false
   }
+  return true
+}
+
+async function onSuggestStructure() {
+  if (!ensureReadyToSuggest()) return
   if (!classification.model) await classification.loadDefaultModel()
   try {
-    await template.suggestNewStructure(scan.entries, classification.model, structureHint.value)
+    if (structureMode.value === 'hybrid') {
+      if (!template.active) {
+        ui.pushToast('기준으로 삼을 현재 템플릿이 없습니다.', 'warning')
+        return
+      }
+      await template.suggestHybridStructure(scan.entries, template.active, classification.model, structureHint.value)
+    } else {
+      await template.suggestNewStructure(scan.entries, classification.model, structureHint.value)
+    }
   } catch {
     ui.pushToast('AI 제안을 받아오지 못했습니다.', 'error')
+  }
+}
+
+async function onRetrySuggestion(adjustment = '') {
+  if (!ensureReadyToSuggest()) return
+  try {
+    await template.retrySuggestion(scan.entries, classification.model, adjustment)
+  } catch {
+    ui.pushToast('AI 제안을 다시 받아오지 못했습니다.', 'error')
   }
 }
 
@@ -222,9 +245,20 @@ async function onSaveAiProposal() {
     <BaseCard>
       <template #header>🤖 AI에게 새 구조 제안받기</template>
       <p class="muted">
-        지금 스캔된 파일 내용을 보고 AI가 기존 템플릿과 무관하게 완전히 새로운 구조를
-        제안합니다. 제안은 바로 템플릿이 되지 않으며, 아래에서 검토한 뒤 저장해야 적용됩니다.
+        지금 스캔된 파일 내용을 보고 AI가 새로운 구조를 제안합니다. 파일이 많으면 서버가
+        자동으로 나눠서 요청합니다. 제안은 바로 템플릿이 되지 않으며, 아래에서 검토한 뒤
+        저장해야 적용됩니다.
       </p>
+      <div class="template-panel__mode-toggle">
+        <label>
+          <input v-model="structureMode" type="radio" value="free" />
+          완전 새 구조
+        </label>
+        <label>
+          <input v-model="structureMode" type="radio" value="hybrid" />
+          하이브리드(현재 템플릿 유지 + 부족한 것만 추가)
+        </label>
+      </div>
       <input v-model="structureHint" type="text" placeholder="요청사항(선택) 예: 부서별로 나눠줘, 연도별로 나눠줘" />
       <BaseButton
         variant="secondary"
@@ -237,6 +271,9 @@ async function onSaveAiProposal() {
       </BaseButton>
 
       <template v-if="template.suggestion">
+        <p v-if="template.suggestionMode === 'hybrid'" class="muted template-panel__suggestion-notes">
+          하이브리드 모드: 현재 템플릿 폴더는 유지되고, 부족한 카테고리만 추가됩니다.
+        </p>
         <p v-if="template.suggestion.notes" class="muted template-panel__suggestion-notes">
           💬 {{ template.suggestion.notes }}
         </p>
@@ -263,11 +300,25 @@ async function onSaveAiProposal() {
             </tbody>
           </table>
         </div>
+
+        <p class="muted">마음에 안 들면 힌트를 바꾸지 않고도 바로 다시 받을 수 있습니다.</p>
+        <div class="template-panel__retry-row">
+          <BaseButton variant="ghost" size="sm" :loading="template.suggesting" @click="onRetrySuggestion()">
+            🔁 그대로 다시
+          </BaseButton>
+          <BaseButton variant="ghost" size="sm" :loading="template.suggesting" @click="onRetrySuggestion('fewer')">
+            ➖ 카테고리 더 적게
+          </BaseButton>
+          <BaseButton variant="ghost" size="sm" :loading="template.suggesting" @click="onRetrySuggestion('more')">
+            ➕ 카테고리 더 많게
+          </BaseButton>
+        </div>
+
         <input v-model="aiTemplateName" type="text" placeholder="이 제안으로 만들 템플릿 이름" />
         <BaseButton
           variant="secondary"
           size="sm"
-          :disabled="!template.suggestion.categories.length"
+          :disabled="!template.suggestion.categories.length && template.suggestionMode !== 'hybrid'"
           @click="onSaveAiProposal"
         >
           이 제안을 템플릿으로 저장
@@ -430,6 +481,28 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.template-panel__mode-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: var(--space-3) 0;
+  font-size: var(--text-sm);
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    cursor: pointer;
+  }
+}
+
+.template-panel__retry-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
 }
 
 .template-panel__suggestion-notes {

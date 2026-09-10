@@ -56,17 +56,49 @@ export async function suggestStructure(
   entries: FileEntry[],
   model: string,
   hint = '',
+  adjustment = '',
 ): Promise<SuggestStructureResponse> {
   const { data } = await apiClient.post<SuggestStructureResponse>('/templates/suggest', {
     entries,
     model,
     hint,
+    adjustment,
+  })
+  return data
+}
+
+export async function suggestStructureUpdate(
+  entries: FileEntry[],
+  template: OrgTemplate,
+  model: string,
+  hint = '',
+  adjustment = '',
+): Promise<SuggestStructureResponse> {
+  const { data } = await apiClient.post<SuggestStructureResponse>('/templates/suggest-update', {
+    entries,
+    template,
+    model,
+    hint,
+    adjustment,
   })
   return data
 }
 
 export async function templateFromAiProposal(categories: string[], name: string): Promise<OrgTemplate> {
   const { data } = await apiClient.post<OrgTemplate>('/templates/from-ai-proposal', {
+    categories,
+    name,
+  })
+  return data
+}
+
+export async function templateFromHybridProposal(
+  template: OrgTemplate,
+  categories: string[],
+  name: string,
+): Promise<OrgTemplate> {
+  const { data } = await apiClient.post<OrgTemplate>('/templates/from-hybrid-proposal', {
+    template,
     categories,
     name,
   })

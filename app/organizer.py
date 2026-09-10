@@ -181,15 +181,100 @@ def propose_structure(
     )
 
 
+DEFAULT_SUGGEST_BATCH_SIZE = 15
+
+# "AI 제안 다시 받기"에서 쓰는 조정 문구. 실측(README 참고)상 파일당 약 26초가 걸려 파일이
+# 많으면 카테고리가 지나치게 세분화되거나 뭉뚱그려지기 쉬운데, 사용자가 매번 힌트를 직접
+# 타이핑하지 않고도 "더 적게/많게"만 눌러 재시도할 수 있게 문구를 한 곳에 모아둔다.
+STRUCTURE_ADJUSTMENTS: dict[str, str] = {
+    "fewer": "카테고리 개수를 지금 제안보다 줄여서 더 큰 범주로 묶어 다시 제안해라.",
+    "more": "카테고리를 지금 제안보다 더 세분화해서 다시 제안해라.",
+}
+
+
+def _combine_hint(hint: str | None, adjustment: str | None) -> str | None:
+    extra = STRUCTURE_ADJUSTMENTS.get(adjustment or "", "")
+    combined = f"{hint or ''} {extra}".strip()
+    return combined or None
+
+
+def _propose_in_batches(
+    summarized: list[dict],
+    model: str,
+    user_hint: str | None,
+    batch_size: int,
+    allowed_folders: list[str] | None = None,
+    existing_folders: list[str] | None = None,
+    progress_cb=None,
+) -> dict:
+    """summarized가 batch_size를 넘으면 여러 번 나눠 호출해 결과를 합친다.
+
+    파일이 많으면(수십~수백 개) 한 번의 AI 호출로는 STRUCTURE_TIMEOUT(600초)도 빠듯할 수
+    있다. 배치마다 서로 다른 이름의 카테고리가 생기는 것을 줄이기 위해, 이전 배치가 만든
+    카테고리를 다음 배치의 힌트에 "가능하면 재사용해라"로 덧붙인다(강제하지는 않는다 —
+    allowed_folders처럼 걸러내면 이번 배치 파일이 이전 배치의 카테고리에 안 맞을 때 갈 곳이
+    없어지기 때문이다). progress_cb(batch_index, total_batches)는 배치가 끝날 때마다
+    호출된다(Streamlit UI의 진행률 표시용, summarize_entries의 progress_cb와 같은 패턴).
+    """
+    if len(summarized) <= batch_size:
+        return llm_client.propose_folder_structure(
+            summarized,
+            model=model,
+            allowed_folders=allowed_folders,
+            existing_folders=existing_folders,
+            user_hint=user_hint,
+        )
+
+    categories: list[str] = []
+    seen_categories: set[str] = set()
+    assignments: dict[str, dict] = {}
+    notes_parts: list[str] = []
+    total_batches = (len(summarized) + batch_size - 1) // batch_size
+
+    for batch_index, i in enumerate(range(0, len(summarized), batch_size), start=1):
+        batch = summarized[i : i + batch_size]
+        batch_hint = user_hint or ""
+        if categories:
+            batch_hint = (
+                f"{batch_hint} 가능하면 다음 기존 카테고리를 재사용해라: {', '.join(categories)}."
+            ).strip()
+        result = llm_client.propose_folder_structure(
+            batch,
+            model=model,
+            allowed_folders=allowed_folders,
+            existing_folders=existing_folders,
+            user_hint=batch_hint or None,
+        )
+        for c in result.get("categories", []):
+            if c and c not in seen_categories:
+                seen_categories.add(c)
+                categories.append(c)
+        assignments.update(result.get("assignments", {}))
+        if result.get("notes"):
+            notes_parts.append(result["notes"])
+        if progress_cb:
+            progress_cb(batch_index, total_batches)
+
+    return {"categories": categories, "assignments": assignments, "notes": " / ".join(notes_parts)}
+
+
 def suggest_new_structure(
-    entries: list[FileEntry], model: str, hint: str | None = None
+    entries: list[FileEntry],
+    model: str,
+    hint: str | None = None,
+    adjustment: str | None = None,
+    batch_size: int | None = None,
+    progress_cb=None,
 ) -> dict:
     """조직 템플릿에 얽매이지 않고 AI가 완전히 새로운 폴더 구조를 자유롭게 제안한다.
 
     propose_structure()는 항상 template.allowed_paths()로 AI를 제약하지만, 이 함수는
     allowed_folders=None으로 호출해 AI가 categories 자체를 새로 지어내게 한다. hint를
-    주면("부서별로 나눠줘" 등) 그 방향을 반영한다. 결과는 바로 템플릿이 되지 않으며,
-    사람이 검토한 뒤 templates.template_from_ai_proposal()로 템플릿을 만들어야 한다.
+    주면("부서별로 나눠줘" 등) 그 방향을 반영하고, adjustment("fewer"/"more")를 주면
+    "AI 제안 다시 받기"에서 카테고리를 줄이거나 늘리는 방향으로 재시도할 수 있다. 파일
+    수가 batch_size(기본 DEFAULT_SUGGEST_BATCH_SIZE)를 넘으면 여러 번 나눠 호출해 결과를
+    합친다. 결과는 바로 템플릿이 되지 않으며, 사람이 검토한 뒤
+    templates.template_from_ai_proposal()로 템플릿을 만들어야 한다.
     """
     summarized = [
         {"relative_path": e.relative_path, "ext": e.ext, "summary": e.summary or "(요약 없음)"}
@@ -202,8 +287,53 @@ def suggest_new_structure(
             "assignments": {},
             "notes": "요약된 파일이 없어 AI에 보낼 수 없습니다. 먼저 파일을 요약한 뒤 다시 시도하세요.",
         }
-    return llm_client.propose_folder_structure(
-        summarized, model=model, allowed_folders=None, user_hint=hint
+    combined_hint = _combine_hint(hint, adjustment)
+    return _propose_in_batches(
+        summarized,
+        model,
+        combined_hint,
+        batch_size or DEFAULT_SUGGEST_BATCH_SIZE,
+        progress_cb=progress_cb,
+    )
+
+
+def suggest_structure_update(
+    entries: list[FileEntry],
+    template: templates.OrgTemplate,
+    model: str,
+    hint: str | None = None,
+    adjustment: str | None = None,
+    batch_size: int | None = None,
+    progress_cb=None,
+) -> dict:
+    """기존 템플릿은 유지한 채, 부족한 카테고리만 AI가 추가로 제안하는 하이브리드 모드.
+
+    suggest_new_structure()(완전 자유)와 classify_entries()가 쓰는 propose_structure()
+    (완전 제약) 사이의 중간이다 — template.allowed_paths()를 existing_folders로 넘겨
+    "우선 사용하되 부족하면 새로 추가"하게 한다. 결과를 템플릿에 반영할 때는
+    templates.template_from_hybrid_proposal()을 써야 한다 — AI가 응답에서 기존 폴더를
+    빠뜨리고 새 카테고리만 돌려주더라도 기존 템플릿이 손상되지 않도록 그 함수가 기존
+    folders를 그대로 보존한다.
+    """
+    summarized = [
+        {"relative_path": e.relative_path, "ext": e.ext, "summary": e.summary or "(요약 없음)"}
+        for e in entries
+        if e.summary_status in ("ok", "empty")
+    ]
+    if not summarized:
+        return {
+            "categories": [],
+            "assignments": {},
+            "notes": "요약된 파일이 없어 AI에 보낼 수 없습니다. 먼저 파일을 요약한 뒤 다시 시도하세요.",
+        }
+    combined_hint = _combine_hint(hint, adjustment)
+    return _propose_in_batches(
+        summarized,
+        model,
+        combined_hint,
+        batch_size or DEFAULT_SUGGEST_BATCH_SIZE,
+        existing_folders=template.allowed_paths(),
+        progress_cb=progress_cb,
     )
 
 

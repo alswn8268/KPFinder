@@ -10,6 +10,7 @@ from app.templates import (
     template_from_ai_proposal,
     template_from_current_structure,
     template_from_folder_list,
+    template_from_hybrid_proposal,
 )
 
 
@@ -109,3 +110,48 @@ def test_template_from_ai_proposal_rejects_empty_categories():
 
     with pytest.raises(ValueError):
         template_from_ai_proposal(["", "  "], name="빈 값뿐인 제안")
+
+
+def _base_hybrid_template() -> OrgTemplate:
+    return OrgTemplate(
+        name="현재 템플릿",
+        folders=[{"path": "01_경영지원", "description": "기존 설명"}, {"path": "99_미분류", "description": ""}],
+        keyword_rules=[{"keywords": ["회의록"], "target": "01_경영지원"}],
+    )
+
+
+def test_template_from_hybrid_proposal_keeps_existing_folders_and_rules():
+    base = _base_hybrid_template()
+    tmpl = template_from_hybrid_proposal(base, ["영업"], name="갱신된 템플릿")
+
+    assert tmpl.allowed_paths() == ["01_경영지원", "99_미분류", "영업"]
+    assert tmpl.keyword_rules == base.keyword_rules
+    # 기존 폴더의 설명이 손상되지 않아야 한다.
+    assert tmpl.folders[0]["description"] == "기존 설명"
+    assert tmpl.name == "갱신된 템플릿"
+
+
+def test_template_from_hybrid_proposal_dedupes_against_existing_folders():
+    base = _base_hybrid_template()
+    tmpl = template_from_hybrid_proposal(base, ["01_경영지원", "영업", "영업"], name="갱신된 템플릿")
+
+    assert tmpl.allowed_paths() == ["01_경영지원", "99_미분류", "영업"]
+
+
+def test_template_from_hybrid_proposal_allows_empty_categories_without_error():
+    """AI가 "지금 템플릿으로 충분하다"고 판단해 새 카테고리가 없으면, template_from_ai_proposal()
+    과 달리 에러 없이 기존 템플릿과 같은 구성을 그대로 돌려줘야 한다."""
+    base = _base_hybrid_template()
+    tmpl = template_from_hybrid_proposal(base, [], name="변화 없음")
+
+    assert tmpl.allowed_paths() == base.allowed_paths()
+    assert tmpl.name == "변화 없음"
+
+
+def test_template_from_hybrid_proposal_does_not_mutate_base_template():
+    base = _base_hybrid_template()
+    original_paths = base.allowed_paths()
+
+    template_from_hybrid_proposal(base, ["영업"], name="갱신된 템플릿")
+
+    assert base.allowed_paths() == original_paths

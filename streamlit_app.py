@@ -20,10 +20,12 @@ from app.content_graph import GraphTooLargeError, render_content_graph
 from app.directory_graph import render_directory_relation_graph, render_directory_tree
 from app.file_ops import apply_move_plan, build_move_plan, undo_move_plan
 from app.organizer import (
+    DEFAULT_SUGGEST_BATCH_SIZE,
     classify_entries,
     plain_destinations,
     status_label,
     suggest_new_structure,
+    suggest_structure_update,
     summarize_entries,
     validate_assignments,
 )
@@ -55,6 +57,7 @@ for key, default in (
     ("edit_history", []),
     ("env_items", None),
     ("ai_structure_suggestion", None),
+    ("ai_structure_suggestion_meta", None),
 ):
     if key not in st.session_state:
         st.session_state[key] = default
@@ -298,6 +301,13 @@ with st.sidebar:
             "지금 스캔된 파일 내용을 보고 AI가 더 나은 구조를 새로 제안하게 할 수도 있습니다. "
             "제안은 바로 템플릿이 되지 않으며, 아래에서 검토한 뒤 별도 버튼으로 저장해야 합니다."
         )
+        ai_structure_mode = st.radio(
+            "제안 방식",
+            options=["free", "hybrid"],
+            format_func=lambda v: "완전 새 구조" if v == "free" else "하이브리드(현재 템플릿 유지 + 부족한 것만 추가)",
+            key="ai_structure_mode",
+            horizontal=True,
+        )
         ai_structure_hint = st.text_input(
             "요청사항(선택)",
             placeholder="예: 부서별로 나눠줘, 연도별로 나눠줘",
@@ -305,11 +315,11 @@ with st.sidebar:
         )
         if not ollama_ok:
             st.caption("Ollama에 연결되어야 AI 구조 제안을 받을 수 있습니다.")
-        if st.button(
-            "AI에게 구조 제안받기",
-            use_container_width=True,
-            disabled=not st.session_state.entries or not ollama_ok,
-        ):
+
+        def _run_ai_suggestion(hint_text, adjustment=None, mode=None, base_template=None):
+            """mode/base_template을 명시하지 않으면(최초 제안) 현재 위젯 상태를 쓰고, 명시하면
+            (다시 받기) 그 값을 그대로 고정한다 — 그렇지 않으면 제안을 받은 뒤 라디오를 바꾸고
+            "다시 받기"를 눌렀을 때 화면에 보이는 제안과 다른 모드로 조용히 바뀌어 버린다."""
             summarized_count = sum(
                 1 for e in st.session_state.entries if e.summary_status in ("ok", "empty")
             )
@@ -318,14 +328,67 @@ with st.sidebar:
                     "아직 요약된 파일이 없습니다. 먼저 '2️⃣ 분류 실행'을 한 번 실행해 파일 요약을 "
                     "만든 뒤 다시 시도하세요."
                 )
-            else:
-                with st.spinner("AI가 새 폴더 구조를 생각하는 중입니다... (파일이 많으면 수 분 걸릴 수 있습니다)"):
-                    st.session_state.ai_structure_suggestion = suggest_new_structure(
-                        st.session_state.entries, model_name, hint=ai_structure_hint or None
+                return
+
+            mode = mode or st.session_state.ai_structure_mode
+            if base_template is None and mode == "hybrid":
+                base_template = st.session_state.template
+
+            def _call_suggest(progress_cb):
+                if mode == "hybrid":
+                    return suggest_structure_update(
+                        st.session_state.entries,
+                        base_template,
+                        model_name,
+                        hint=hint_text or None,
+                        adjustment=adjustment,
+                        progress_cb=progress_cb,
+                    )
+                return suggest_new_structure(
+                    st.session_state.entries,
+                    model_name,
+                    hint=hint_text or None,
+                    adjustment=adjustment,
+                    progress_cb=progress_cb,
+                )
+
+            if summarized_count > DEFAULT_SUGGEST_BATCH_SIZE:
+                total_batches = -(-summarized_count // DEFAULT_SUGGEST_BATCH_SIZE)
+                progress = st.progress(0.0, text=f"AI에게 구조를 요청하는 중... (배치 0/{total_batches})")
+
+                def _on_batch_progress(batch_index, total):
+                    progress.progress(
+                        batch_index / total,
+                        text=f"AI에게 구조를 요청하는 중... (배치 {batch_index}/{total})",
                     )
 
+                result = _call_suggest(_on_batch_progress)
+                progress.progress(1.0, text="완료!")
+            else:
+                with st.spinner(
+                    "AI가 새 폴더 구조를 생각하는 중입니다... (파일이 많으면 수 분 걸릴 수 있습니다)"
+                ):
+                    result = _call_suggest(None)
+
+            st.session_state.ai_structure_suggestion = result
+            st.session_state.ai_structure_suggestion_meta = {
+                "mode": mode,
+                "hint": hint_text,
+                "base_template": base_template,
+            }
+
+        if st.button(
+            "AI에게 구조 제안받기",
+            use_container_width=True,
+            disabled=not st.session_state.entries or not ollama_ok,
+        ):
+            _run_ai_suggestion(ai_structure_hint)
+
         ai_suggestion = st.session_state.ai_structure_suggestion
-        if ai_suggestion:
+        ai_suggestion_meta = st.session_state.ai_structure_suggestion_meta
+        if ai_suggestion and ai_suggestion_meta:
+            if ai_suggestion_meta["mode"] == "hybrid":
+                st.caption("하이브리드 모드: 현재 템플릿 폴더는 유지되고, 부족한 카테고리만 추가됩니다.")
             if ai_suggestion.get("notes"):
                 st.caption(f"💬 {ai_suggestion['notes']}")
             if ai_suggestion["categories"]:
@@ -344,21 +407,45 @@ with st.sidebar:
                 )
                 st.dataframe(preview_df, use_container_width=True, hide_index=True)
 
+            st.caption("마음에 안 들면 힌트를 바꾸지 않고도 바로 다시 받을 수 있습니다.")
+            retry_cols = st.columns(3)
+            retry_kwargs = {
+                "mode": ai_suggestion_meta["mode"],
+                "base_template": ai_suggestion_meta["base_template"],
+            }
+            if retry_cols[0].button("🔁 그대로 다시", use_container_width=True, disabled=not ollama_ok):
+                _run_ai_suggestion(ai_suggestion_meta["hint"], **retry_kwargs)
+                st.rerun()
+            if retry_cols[1].button("➖ 카테고리 더 적게", use_container_width=True, disabled=not ollama_ok):
+                _run_ai_suggestion(ai_suggestion_meta["hint"], adjustment="fewer", **retry_kwargs)
+                st.rerun()
+            if retry_cols[2].button("➕ 카테고리 더 많게", use_container_width=True, disabled=not ollama_ok):
+                _run_ai_suggestion(ai_suggestion_meta["hint"], adjustment="more", **retry_kwargs)
+                st.rerun()
+
             ai_template_name = st.text_input(
                 "이 제안으로 만들 템플릿 이름", value="AI 제안 템플릿", key="ai_proposal_template_name"
             )
             if st.button(
                 "이 제안을 템플릿으로 저장",
                 use_container_width=True,
-                disabled=not ai_suggestion["categories"],
+                disabled=not ai_suggestion["categories"] and ai_suggestion_meta["mode"] != "hybrid",
             ):
                 try:
-                    new_template = templates.template_from_ai_proposal(
-                        ai_suggestion["categories"], name=ai_template_name or "AI 제안 템플릿"
-                    )
+                    if ai_suggestion_meta["mode"] == "hybrid":
+                        new_template = templates.template_from_hybrid_proposal(
+                            ai_suggestion_meta["base_template"],
+                            ai_suggestion["categories"],
+                            name=ai_template_name or "AI 제안 템플릿",
+                        )
+                    else:
+                        new_template = templates.template_from_ai_proposal(
+                            ai_suggestion["categories"], name=ai_template_name or "AI 제안 템플릿"
+                        )
                     templates.save_template(new_template)
                     st.session_state.template = new_template
                     st.session_state.ai_structure_suggestion = None
+                    st.session_state.ai_structure_suggestion_meta = None
                     st.success(f"템플릿 '{new_template.name}'을(를) 저장하고 적용했습니다.")
                     st.rerun()
                 except ValueError as exc:

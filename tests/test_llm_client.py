@@ -215,6 +215,67 @@ def test_propose_folder_structure_omits_hint_line_when_not_given(monkeypatch):
     assert "사용자가 원하는 방향" not in captured["messages"][0]["content"]
 
 
+def test_propose_folder_structure_existing_folders_is_soft_constraint(monkeypatch):
+    """existing_folders(하이브리드 모드)는 allowed_folders와 달리 "우선 사용" 문구만 넣고,
+    새 카테고리를 추가로 제안해도 된다는 안내도 함께 넣어야 한다."""
+    captured = {}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["messages"] = json["messages"]
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": '{"categories": [], "assignments": {}, "notes": ""}'}}
+
+        return FakeResponse()
+
+    monkeypatch.setattr(llm_client.requests, "post", fake_post)
+
+    llm_client.propose_folder_structure(
+        [{"relative_path": "a.txt", "ext": ".txt", "summary": "x"}],
+        existing_folders=["01_경영지원", "02_인사"],
+    )
+
+    system_content = captured["messages"][0]["content"]
+    assert "01_경영지원" in system_content
+    assert "02_인사" in system_content
+    assert "새 카테고리를 추가로" in system_content
+    # 하드 제약(allowed_folders) 문구는 섞여 들어가면 안 된다 — 소프트 제약이어야 한다.
+    assert "반드시 다음 목록 중 하나로만" not in system_content
+
+
+def test_propose_folder_structure_allowed_folders_takes_priority_over_existing(monkeypatch):
+    """allowed_folders(하드 제약)와 existing_folders(소프트 제약)가 둘 다 오면 하드 제약이 이긴다."""
+    captured = {}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["messages"] = json["messages"]
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": '{"categories": [], "assignments": {}, "notes": ""}'}}
+
+        return FakeResponse()
+
+    monkeypatch.setattr(llm_client.requests, "post", fake_post)
+
+    llm_client.propose_folder_structure(
+        [{"relative_path": "a.txt", "ext": ".txt", "summary": "x"}],
+        allowed_folders=["01_경영지원"],
+        existing_folders=["다른폴더"],
+    )
+
+    system_content = captured["messages"][0]["content"]
+    assert "반드시 다음 목록 중 하나로만" in system_content
+    assert "다른폴더" not in system_content
+
+
 def test_propose_folder_structure_timeout_is_overridable(monkeypatch):
     captured = {}
 
