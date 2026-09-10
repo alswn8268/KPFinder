@@ -1,4 +1,4 @@
-"""KPFinder(AI 폴더 정리 도우미) — Streamlit 데모 앱.
+"""K-PathFinder(AI 폴더 정리 도우미) — Streamlit 데모 앱.
 
 흐름: 환경 점검 -> 스캔 -> (검색/그래프 탐색) -> 규칙+AI 분류 -> 사람이 파일별로 검토/수정
 -> 최종 상태 미리보기 -> (승인 시) 적용.
@@ -23,6 +23,7 @@ from app.organizer import (
     classify_entries,
     plain_destinations,
     status_label,
+    suggest_new_structure,
     summarize_entries,
     validate_assignments,
 )
@@ -41,7 +42,7 @@ from sample_data import generate_sample_data as sample_datasets
 from sample_data.generate_sample_data import generate as generate_sample_data
 from sample_data.org_templates import SAMPLE_TEMPLATES
 
-st.set_page_config(page_title="KPFinder", layout="wide")
+st.set_page_config(page_title="K-PathFinder", layout="wide")
 
 for key, default in (
     ("entries", []),
@@ -53,11 +54,12 @@ for key, default in (
     ("user_overrides", {}),
     ("edit_history", []),
     ("env_items", None),
+    ("ai_structure_suggestion", None),
 ):
     if key not in st.session_state:
         st.session_state[key] = default
 
-st.title("📁 KPFinder")
+st.title("📁 K-PathFinder")
 st.caption("AI 폴더 정리 도우미")
 st.caption(
     "환경 점검 → 스캔 → 규칙/AI 분류 → 사람이 확인·수정 → 적용. "
@@ -290,6 +292,77 @@ with st.sidebar:
                 st.success(f"템플릿 '{st.session_state.template.name}'을(를) 만들었습니다.")
             except ValueError as exc:
                 st.error(str(exc))
+
+        st.divider()
+        st.caption(
+            "지금 스캔된 파일 내용을 보고 AI가 더 나은 구조를 새로 제안하게 할 수도 있습니다. "
+            "제안은 바로 템플릿이 되지 않으며, 아래에서 검토한 뒤 별도 버튼으로 저장해야 합니다."
+        )
+        ai_structure_hint = st.text_input(
+            "요청사항(선택)",
+            placeholder="예: 부서별로 나눠줘, 연도별로 나눠줘",
+            key="ai_structure_hint",
+        )
+        if not ollama_ok:
+            st.caption("Ollama에 연결되어야 AI 구조 제안을 받을 수 있습니다.")
+        if st.button(
+            "AI에게 구조 제안받기",
+            use_container_width=True,
+            disabled=not st.session_state.entries or not ollama_ok,
+        ):
+            summarized_count = sum(
+                1 for e in st.session_state.entries if e.summary_status in ("ok", "empty")
+            )
+            if summarized_count == 0:
+                st.warning(
+                    "아직 요약된 파일이 없습니다. 먼저 '2️⃣ 분류 실행'을 한 번 실행해 파일 요약을 "
+                    "만든 뒤 다시 시도하세요."
+                )
+            else:
+                with st.spinner("AI가 새 폴더 구조를 생각하는 중입니다... (파일이 많으면 수 분 걸릴 수 있습니다)"):
+                    st.session_state.ai_structure_suggestion = suggest_new_structure(
+                        st.session_state.entries, model_name, hint=ai_structure_hint or None
+                    )
+
+        ai_suggestion = st.session_state.ai_structure_suggestion
+        if ai_suggestion:
+            if ai_suggestion.get("notes"):
+                st.caption(f"💬 {ai_suggestion['notes']}")
+            if ai_suggestion["categories"]:
+                st.write(f"**제안된 카테고리**: {', '.join(ai_suggestion['categories'])}")
+            if ai_suggestion["assignments"]:
+                preview_df = pd.DataFrame(
+                    [
+                        {
+                            "파일": src,
+                            "제안 위치": info.get("dst", ""),
+                            "이유": info.get("reason", ""),
+                            "신뢰도": info.get("confidence", ""),
+                        }
+                        for src, info in ai_suggestion["assignments"].items()
+                    ]
+                )
+                st.dataframe(preview_df, use_container_width=True, hide_index=True)
+
+            ai_template_name = st.text_input(
+                "이 제안으로 만들 템플릿 이름", value="AI 제안 템플릿", key="ai_proposal_template_name"
+            )
+            if st.button(
+                "이 제안을 템플릿으로 저장",
+                use_container_width=True,
+                disabled=not ai_suggestion["categories"],
+            ):
+                try:
+                    new_template = templates.template_from_ai_proposal(
+                        ai_suggestion["categories"], name=ai_template_name or "AI 제안 템플릿"
+                    )
+                    templates.save_template(new_template)
+                    st.session_state.template = new_template
+                    st.session_state.ai_structure_suggestion = None
+                    st.success(f"템플릿 '{new_template.name}'을(를) 저장하고 적용했습니다.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
 
     with st.expander("📐 폴더 구조만 복사 (내용 없이)"):
         st.caption("스캔된 폴더의 하위 폴더 체계만, 파일 내용 없이 다른 위치에 그대로 만듭니다.")

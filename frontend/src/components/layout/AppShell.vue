@@ -48,7 +48,7 @@ function onColorInput(e: Event) {
       <RouterLink to="/" class="app-shell__brand">
         <img class="app-shell__logo" src="/favicon.svg" alt="" aria-hidden="true" width="32" height="32" />
         <div>
-          <p class="app-shell__title">KPFinder</p>
+          <p class="app-shell__title">K-PathFinder</p>
           <p class="app-shell__subtitle">AI 폴더 정리 도우미 · 로컬 문서 정리</p>
         </div>
       </RouterLink>

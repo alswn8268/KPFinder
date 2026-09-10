@@ -34,7 +34,7 @@ from api.routers import (
     versions,
 )
 
-app = FastAPI(title="KPFinder API", version="2.0.0")
+app = FastAPI(title="K-PathFinder API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,

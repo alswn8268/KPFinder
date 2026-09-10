@@ -167,6 +167,54 @@ def test_pull_model_stream_yields_ollama_progress_lines(monkeypatch):
     assert captured["url"].endswith("/api/pull")
 
 
+def test_propose_folder_structure_includes_user_hint_in_system_prompt(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["messages"] = json["messages"]
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": '{"categories": [], "assignments": {}, "notes": ""}'}}
+
+        return FakeResponse()
+
+    monkeypatch.setattr(llm_client.requests, "post", fake_post)
+
+    llm_client.propose_folder_structure(
+        [{"relative_path": "a.txt", "ext": ".txt", "summary": "x"}],
+        user_hint="부서별로 나눠줘",
+    )
+
+    system_content = captured["messages"][0]["content"]
+    assert "부서별로 나눠줘" in system_content
+
+
+def test_propose_folder_structure_omits_hint_line_when_not_given(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["messages"] = json["messages"]
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": '{"categories": [], "assignments": {}, "notes": ""}'}}
+
+        return FakeResponse()
+
+    monkeypatch.setattr(llm_client.requests, "post", fake_post)
+
+    llm_client.propose_folder_structure([{"relative_path": "a.txt", "ext": ".txt", "summary": "x"}])
+
+    assert "사용자가 원하는 방향" not in captured["messages"][0]["content"]
+
+
 def test_propose_folder_structure_timeout_is_overridable(monkeypatch):
     captured = {}
 

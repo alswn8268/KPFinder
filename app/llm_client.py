@@ -166,11 +166,16 @@ def propose_folder_structure(
     model: str = DEFAULT_MODEL,
     allowed_folders: list[str] | None = None,
     timeout: int = STRUCTURE_TIMEOUT,
+    user_hint: str | None = None,
 ) -> dict:
     """파일별 요약을 바탕으로 새 폴더 구조와 파일별 이동 위치를 제안받는다.
 
     allowed_folders를 주면 AI가 그 목록 안에서만 목적지를 고르도록 제약한다
-    (조직 표준 템플릿 밖의 임의 카테고리 생성을 막기 위함).
+    (조직 표준 템플릿 밖의 임의 카테고리 생성을 막기 위함). None이면 AI가 categories를
+    완전히 새로 자유롭게 제안한다(app.organizer.suggest_new_structure에서 사용).
+
+    user_hint를 주면 "부서별로 나눠줘"처럼 사용자가 원하는 분류 방향을 시스템 프롬프트에
+    한 줄 덧붙인다.
 
     반환값: {"categories": [...],
              "assignments": {"기존 상대경로": {"dst": "새경로", "reason": "...", "confidence": "높음|보통|낮음"}},
@@ -187,6 +192,7 @@ def propose_folder_structure(
             "목적지 폴더는 반드시 다음 목록 중 하나로만 시작해야 한다(새 폴더명을 임의로 "
             f"만들지 마라): {folder_list_text}. "
         )
+    hint_constraint = f"사용자가 원하는 방향: {user_hint}. " if user_hint else ""
     messages = [
         {
             "role": "system",
@@ -195,6 +201,7 @@ def propose_folder_structure(
                 "아래는 폴더 안 파일들의 경로와 요약이다. "
                 "내용과 문서 종류를 기준으로 각 파일을 어느 폴더로 옮기면 좋을지 결정해라. "
                 + folder_constraint
+                + hint_constraint
                 + "파일별로 분류 이유(reason)와 신뢰도(confidence: 높음/보통/낮음)도 함께 제시해라. "
                 "신뢰도는 파일명·내용·규칙이 모두 일치하면 '높음', 내용은 일치하지만 "
                 "직접적인 규칙이 없으면 '보통', 본문이 불완전하거나 여러 카테고리로 "

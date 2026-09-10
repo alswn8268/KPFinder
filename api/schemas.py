@@ -119,6 +119,23 @@ class TemplateFromListRequest(BaseModel):
     keep_unclassified: bool = True
 
 
+class SuggestStructureRequest(BaseModel):
+    entries: list[FileEntryModel]
+    model: str
+    hint: str = ""
+
+
+class SuggestStructureResponse(BaseModel):
+    categories: list[str]
+    assignments: dict[str, AssignmentInfo]
+    notes: str
+
+
+class TemplateFromAiProposalRequest(BaseModel):
+    categories: list[str]
+    name: str
+
+
 # ---- 스캔 ----
 
 

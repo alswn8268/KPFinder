@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from app import llm_client
-from app.organizer import classify_entries, validate_assignments
+from app.organizer import classify_entries, suggest_new_structure, validate_assignments
 from app.scanner import FileEntry
 from app.similar import find_similar_documents
 from app.templates import default_template
@@ -150,3 +150,40 @@ def test_classify_entries_rejects_ai_folder_outside_template(monkeypatch):
     assert not dst.startswith("AI가_지어낸_폴더")
     assert dst.startswith("99_미분류")
     assert result["assignments"]["이상한파일.txt"]["source"] == "fallback"
+
+
+def test_suggest_new_structure_calls_llm_without_allowed_folders(monkeypatch):
+    """propose_structure()와 달리, suggest_new_structure()는 AI가 카테고리를 자유롭게
+    새로 짓게 해야 한다 — allowed_folders=None으로 호출되는 것이 이 기능의 핵심이다."""
+    captured = {}
+
+    def fake_propose(file_entries, model, allowed_folders=None, user_hint=None):
+        captured["allowed_folders"] = allowed_folders
+        captured["user_hint"] = user_hint
+        captured["file_entries"] = file_entries
+        return {"categories": ["새카테고리"], "assignments": {}, "notes": "제안 완료"}
+
+    monkeypatch.setattr(llm_client, "propose_folder_structure", fake_propose)
+
+    entry = _entry("문서.txt", summary="내용")
+    result = suggest_new_structure([entry], model="unused", hint="부서별로 나눠줘")
+
+    assert captured["allowed_folders"] is None
+    assert captured["user_hint"] == "부서별로 나눠줘"
+    assert result["categories"] == ["새카테고리"]
+
+
+def test_suggest_new_structure_skips_llm_when_no_summarized_files(monkeypatch):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("요약된 파일이 없는데 Ollama가 호출되었습니다")
+
+    monkeypatch.setattr(llm_client, "propose_folder_structure", fail_if_called)
+
+    entry = _entry("문서.txt")  # summary_status가 "pending"인 채로 남는다
+    result = suggest_new_structure([entry], model="unused")
+
+    assert result == {
+        "categories": [],
+        "assignments": {},
+        "notes": "요약된 파일이 없어 AI에 보낼 수 없습니다. 먼저 파일을 요약한 뒤 다시 시도하세요.",
+    }

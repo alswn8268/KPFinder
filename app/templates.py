@@ -163,6 +163,32 @@ def template_from_folder_list(text: str, name: str, keep_unclassified: bool = Tr
     return OrgTemplate(name=name, folders=folders, keyword_rules=[])
 
 
+def template_from_ai_proposal(categories: list[str], name: str) -> OrgTemplate:
+    """AI가 제안한 카테고리 목록으로 템플릿을 만든다(app.organizer.suggest_new_structure 결과용).
+
+    template_from_folder_list()와 같은 패턴이지만, AI 응답은 빈 값·중복이 섞여 나올 수
+    있어 한 단계 더 엄격하게 최소 검증한다(빈 값 제외, 중복 제거). 저장은 여기서 하지 않고
+    호출자가 save_template()을 그대로 재사용한다 — "제안받기"와 "템플릿으로 저장"을 분리해
+    사람이 검토할 시간을 두는 것이 이 기능의 핵심 안전 원칙이다.
+    """
+    seen: set[str] = set()
+    folders = []
+    for raw in categories or []:
+        path = (raw or "").strip().strip("/\\")
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        folders.append({"path": path, "description": ""})
+
+    if not folders:
+        raise ValueError("AI가 제안한 카테고리가 없습니다.")
+
+    if not any(f["path"] == UNCLASSIFIED_FOLDER for f in folders):
+        folders.append({"path": UNCLASSIFIED_FOLDER, "description": "규칙/AI로 분류하지 못한 파일"})
+
+    return OrgTemplate(name=name, folders=folders, keyword_rules=[])
+
+
 def duplicate_hint(entry: FileEntry) -> bool:
     name_lower = entry.name.lower()
     return any(kw.lower() in name_lower for kw in DUPLICATE_HINT_KEYWORDS)

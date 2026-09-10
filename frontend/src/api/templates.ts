@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { FileEntry, OrgTemplate } from './types'
+import type { FileEntry, OrgTemplate, SuggestStructureResponse } from './types'
 
 export async function listTemplates(): Promise<OrgTemplate[]> {
   const { data } = await apiClient.get<OrgTemplate[]>('/templates')
@@ -48,6 +48,27 @@ export async function templateFromFolderList(
     text,
     name,
     keep_unclassified: keepUnclassified,
+  })
+  return data
+}
+
+export async function suggestStructure(
+  entries: FileEntry[],
+  model: string,
+  hint = '',
+): Promise<SuggestStructureResponse> {
+  const { data } = await apiClient.post<SuggestStructureResponse>('/templates/suggest', {
+    entries,
+    model,
+    hint,
+  })
+  return data
+}
+
+export async function templateFromAiProposal(categories: string[], name: string): Promise<OrgTemplate> {
+  const { data } = await apiClient.post<OrgTemplate>('/templates/from-ai-proposal', {
+    categories,
+    name,
   })
   return data
 }

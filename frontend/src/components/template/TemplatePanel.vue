@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import { exportTemplate } from '@/api/templates'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { downloadBlob } from '@/utils/download'
+import { useClassificationStore } from '@/stores/classification'
 import { useScanStore } from '@/stores/scan'
 import { useTemplateStore } from '@/stores/template'
 import { useUiStore } from '@/stores/ui'
 
 const template = useTemplateStore()
 const scan = useScanStore()
+const classification = useClassificationStore()
 const ui = useUiStore()
 
 const importText = ref('')
@@ -95,6 +97,47 @@ async function onSave() {
   await template.persist()
   ui.pushToast('템플릿을 저장했습니다.', 'success')
 }
+
+const structureHint = ref('')
+const aiTemplateName = ref('AI 제안 템플릿')
+
+const suggestionRows = computed(() =>
+  template.suggestion
+    ? Object.entries(template.suggestion.assignments).map(([src, info]) => ({ src, ...info }))
+    : [],
+)
+
+async function onSuggestStructure() {
+  if (!scan.hasScanned) {
+    ui.pushToast('먼저 폴더를 스캔하세요.', 'warning')
+    return
+  }
+  const summarizedCount = scan.entries.filter(
+    (e) => e.summary_status === 'ok' || e.summary_status === 'empty',
+  ).length
+  if (summarizedCount === 0) {
+    ui.pushToast(
+      '아직 요약된 파일이 없습니다. 먼저 분류를 한 번 실행해 파일 요약을 만든 뒤 다시 시도하세요.',
+      'warning',
+    )
+    return
+  }
+  if (!classification.model) await classification.loadDefaultModel()
+  try {
+    await template.suggestNewStructure(scan.entries, classification.model, structureHint.value)
+  } catch {
+    ui.pushToast('AI 제안을 받아오지 못했습니다.', 'error')
+  }
+}
+
+async function onSaveAiProposal() {
+  try {
+    const saved = await template.fromAiProposal(aiTemplateName.value.trim() || 'AI 제안 템플릿')
+    ui.pushToast(`템플릿 '${saved?.name}'을(를) 만들었습니다.`, 'success')
+  } catch {
+    ui.pushToast('템플릿을 만들지 못했습니다.', 'error')
+  }
+}
 </script>
 
 <template>
@@ -174,6 +217,62 @@ async function onSave() {
       <BaseButton variant="secondary" size="sm" :disabled="!folderListText.trim()" @click="onFromFolderList">
         이 목록으로 템플릿 만들기
       </BaseButton>
+    </BaseCard>
+
+    <BaseCard>
+      <template #header>🤖 AI에게 새 구조 제안받기</template>
+      <p class="muted">
+        지금 스캔된 파일 내용을 보고 AI가 기존 템플릿과 무관하게 완전히 새로운 구조를
+        제안합니다. 제안은 바로 템플릿이 되지 않으며, 아래에서 검토한 뒤 저장해야 적용됩니다.
+      </p>
+      <input v-model="structureHint" type="text" placeholder="요청사항(선택) 예: 부서별로 나눠줘, 연도별로 나눠줘" />
+      <BaseButton
+        variant="secondary"
+        size="sm"
+        :disabled="!scan.hasScanned"
+        :loading="template.suggesting"
+        @click="onSuggestStructure"
+      >
+        AI에게 구조 제안받기
+      </BaseButton>
+
+      <template v-if="template.suggestion">
+        <p v-if="template.suggestion.notes" class="muted template-panel__suggestion-notes">
+          💬 {{ template.suggestion.notes }}
+        </p>
+        <p v-if="template.suggestion.categories.length" class="template-panel__suggestion-categories">
+          <strong>제안된 카테고리:</strong> {{ template.suggestion.categories.join(', ') }}
+        </p>
+        <div v-if="suggestionRows.length" class="template-panel__suggestion-table-wrap">
+          <table class="template-panel__suggestion-table">
+            <thead>
+              <tr>
+                <th>파일</th>
+                <th>제안 위치</th>
+                <th>이유</th>
+                <th>신뢰도</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in suggestionRows" :key="row.src">
+                <td>{{ row.src }}</td>
+                <td>{{ row.dst }}</td>
+                <td>{{ row.reason }}</td>
+                <td>{{ row.confidence }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <input v-model="aiTemplateName" type="text" placeholder="이 제안으로 만들 템플릿 이름" />
+        <BaseButton
+          variant="secondary"
+          size="sm"
+          :disabled="!template.suggestion.categories.length"
+          @click="onSaveAiProposal"
+        >
+          이 제안을 템플릿으로 저장
+        </BaseButton>
+      </template>
     </BaseCard>
 
     <BaseCard v-if="template.saved.length">
@@ -331,6 +430,38 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.template-panel__suggestion-notes {
+  margin-top: var(--space-2);
+}
+
+.template-panel__suggestion-categories {
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0;
+}
+
+.template-panel__suggestion-table-wrap {
+  overflow-x: auto;
+  margin: var(--space-3) 0;
+}
+
+.template-panel__suggestion-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+
+  th,
+  td {
+    border: 1px solid var(--color-border-strong);
+    padding: var(--space-2) var(--space-3);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  th {
+    background: var(--color-neutral-soft);
+  }
 }
 
 .template-panel__saved {

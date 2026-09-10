@@ -3,9 +3,15 @@ import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 
+from app import organizer
 from app import templates as templates_module
+from app.llm_client import OllamaError
 from api.serialization import model_to_template, models_to_entries, template_to_model
 from api.schemas import (
+    AssignmentInfo,
+    SuggestStructureRequest,
+    SuggestStructureResponse,
+    TemplateFromAiProposalRequest,
     TemplateFromListRequest,
     TemplateFromStructureRequest,
     TemplateImportRequest,
@@ -66,6 +72,31 @@ def from_folder_list(req: TemplateFromListRequest):
         tmpl = templates_module.template_from_folder_list(
             req.text, name=req.name, keep_unclassified=req.keep_unclassified
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return template_to_model(tmpl)
+
+
+@router.post("/suggest", response_model=SuggestStructureResponse)
+def suggest_structure(req: SuggestStructureRequest):
+    """조직 템플릿과 무관하게 AI가 새 폴더 구조를 제안한다 — 검토용, 아직 템플릿이 아니다."""
+    entries = models_to_entries(req.entries)
+    try:
+        result = organizer.suggest_new_structure(entries, req.model, hint=req.hint or None)
+    except OllamaError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    assignments = {src: AssignmentInfo(**info) for src, info in result["assignments"].items()}
+    return SuggestStructureResponse(
+        categories=result.get("categories", []),
+        assignments=assignments,
+        notes=result.get("notes", ""),
+    )
+
+
+@router.post("/from-ai-proposal", response_model=TemplateModel)
+def from_ai_proposal(req: TemplateFromAiProposalRequest):
+    try:
+        tmpl = templates_module.template_from_ai_proposal(req.categories, name=req.name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return template_to_model(tmpl)

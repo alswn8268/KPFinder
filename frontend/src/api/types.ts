@@ -101,6 +101,12 @@ export interface ClassifyResponse {
   error_detail: string
 }
 
+export interface SuggestStructureResponse {
+  categories: string[]
+  assignments: Record<string, AssignmentInfo>
+  notes: string
+}
+
 export interface SimilarPair {
   a: string
   b: string

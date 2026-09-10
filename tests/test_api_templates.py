@@ -73,3 +73,90 @@ def test_save_and_list_templates(client):
 
     listed = client.get("/api/templates").json()
     assert any(t["name"] == "저장 테스트 템플릿" for t in listed)
+
+
+def _summarized_entry(rel_path: str, summary: str = "요약 내용") -> dict:
+    return {
+        "path": rel_path,
+        "relative_path": rel_path,
+        "name": rel_path,
+        "ext": ".txt",
+        "size": 1,
+        "modified": "2026-01-01T00:00:00",
+        "summary": summary,
+        "summary_status": "ok",
+    }
+
+
+def test_suggest_structure_returns_ai_proposal_without_allowed_folders(client, monkeypatch):
+    from app import llm_client
+
+    def fake_propose(file_entries, model, allowed_folders=None, user_hint=None, timeout=None):
+        assert allowed_folders is None
+        assert user_hint == "부서별로 나눠줘"
+        return {
+            "categories": ["영업", "마케팅"],
+            "assignments": {
+                "문서.txt": {"dst": "영업/문서.txt", "reason": "영업 관련 문서", "confidence": "높음"}
+            },
+            "notes": "제안 완료",
+        }
+
+    monkeypatch.setattr(llm_client, "propose_folder_structure", fake_propose)
+
+    resp = client.post(
+        "/api/templates/suggest",
+        json={"entries": [_summarized_entry("문서.txt")], "model": "unused", "hint": "부서별로 나눠줘"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["categories"] == ["영업", "마케팅"]
+    assert data["assignments"]["문서.txt"]["dst"] == "영업/문서.txt"
+    assert data["notes"] == "제안 완료"
+
+
+def test_suggest_structure_returns_guidance_when_nothing_summarized(client):
+    unsummarized = {
+        "path": "문서.txt",
+        "relative_path": "문서.txt",
+        "name": "문서.txt",
+        "ext": ".txt",
+        "size": 1,
+        "modified": "2026-01-01T00:00:00",
+    }
+    resp = client.post("/api/templates/suggest", json={"entries": [unsummarized], "model": "unused"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["categories"] == []
+    assert "요약" in data["notes"]
+
+
+def test_suggest_structure_returns_502_on_ollama_error(client, monkeypatch):
+    from app import llm_client
+
+    def fake_propose(*args, **kwargs):
+        raise llm_client.OllamaError("연결 실패")
+
+    monkeypatch.setattr(llm_client, "propose_folder_structure", fake_propose)
+
+    resp = client.post(
+        "/api/templates/suggest", json={"entries": [_summarized_entry("문서.txt")], "model": "unused"}
+    )
+    assert resp.status_code == 502
+
+
+def test_from_ai_proposal_creates_template(client):
+    resp = client.post(
+        "/api/templates/from-ai-proposal",
+        json={"categories": ["영업", "영업", "마케팅", ""], "name": "AI 제안 템플릿"},
+    )
+    assert resp.status_code == 200
+    paths = [f["path"] for f in resp.json()["folders"]]
+    assert paths.count("영업") == 1
+    assert "마케팅" in paths
+    assert "99_미분류" in paths
+
+
+def test_from_ai_proposal_rejects_empty_categories(client):
+    resp = client.post("/api/templates/from-ai-proposal", json={"categories": [], "name": "빈 템플릿"})
+    assert resp.status_code == 400

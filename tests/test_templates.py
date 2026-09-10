@@ -7,6 +7,7 @@ from app.templates import (
     default_template,
     export_template,
     import_template,
+    template_from_ai_proposal,
     template_from_current_structure,
     template_from_folder_list,
 )
@@ -88,3 +89,23 @@ def test_template_from_folder_list_rejects_empty_input():
 
     with pytest.raises(ValueError):
         template_from_folder_list("   \n# 주석뿐\n", name="빈 템플릿")
+
+
+def test_template_from_ai_proposal_dedupes_and_filters_empty():
+    tmpl = template_from_ai_proposal(["영업", "", "영업", "마케팅", "  "], name="AI 제안")
+    assert tmpl.allowed_paths() == ["영업", "마케팅", "99_미분류"]
+
+
+def test_template_from_ai_proposal_keeps_existing_unclassified_folder_once():
+    tmpl = template_from_ai_proposal(["영업", "99_미분류"], name="AI 제안")
+    assert tmpl.allowed_paths().count("99_미분류") == 1
+
+
+def test_template_from_ai_proposal_rejects_empty_categories():
+    import pytest
+
+    with pytest.raises(ValueError):
+        template_from_ai_proposal([], name="빈 제안")
+
+    with pytest.raises(ValueError):
+        template_from_ai_proposal(["", "  "], name="빈 값뿐인 제안")

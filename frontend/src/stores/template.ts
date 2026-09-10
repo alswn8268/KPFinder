@@ -7,16 +7,20 @@ import {
   listSampleTemplates,
   listTemplates,
   saveTemplate,
+  suggestStructure,
+  templateFromAiProposal,
   templateFromCurrentStructure,
   templateFromFolderList,
 } from '@/api/templates'
-import type { FileEntry, OrgTemplate } from '@/api/types'
+import type { FileEntry, OrgTemplate, SuggestStructureResponse } from '@/api/types'
 
 export const useTemplateStore = defineStore('template', () => {
   const active = ref<OrgTemplate | null>(null)
   const saved = ref<OrgTemplate[]>([])
   const samples = ref<OrgTemplate[]>([])
   const loading = ref(false)
+  const suggestion = ref<SuggestStructureResponse | null>(null)
+  const suggesting = ref(false)
 
   async function loadDefault() {
     active.value = await getDefaultTemplate()
@@ -58,11 +62,36 @@ export const useTemplateStore = defineStore('template', () => {
     active.value = template
   }
 
+  /** AI가 새 폴더 구조를 자유롭게 제안하게 한다 — 결과는 바로 템플릿이 되지 않고
+   * suggestion에 담겨 사람이 검토한 뒤 fromAiProposal()로 넘어가야 한다. */
+  async function suggestNewStructure(entries: FileEntry[], model: string, hint = '') {
+    suggesting.value = true
+    try {
+      suggestion.value = await suggestStructure(entries, model, hint)
+      return suggestion.value
+    } finally {
+      suggesting.value = false
+    }
+  }
+
+  async function fromAiProposal(name: string) {
+    if (!suggestion.value) return
+    active.value = await templateFromAiProposal(suggestion.value.categories, name)
+    suggestion.value = null
+    return active.value
+  }
+
+  function clearSuggestion() {
+    suggestion.value = null
+  }
+
   return {
     active,
     saved,
     samples,
     loading,
+    suggestion,
+    suggesting,
     loadDefault,
     refreshSaved,
     loadSamples,
@@ -71,5 +100,8 @@ export const useTemplateStore = defineStore('template', () => {
     fromFolderList,
     persist,
     selectSaved,
+    suggestNewStructure,
+    fromAiProposal,
+    clearSuggestion,
   }
 })

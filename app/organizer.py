@@ -181,6 +181,32 @@ def propose_structure(
     )
 
 
+def suggest_new_structure(
+    entries: list[FileEntry], model: str, hint: str | None = None
+) -> dict:
+    """조직 템플릿에 얽매이지 않고 AI가 완전히 새로운 폴더 구조를 자유롭게 제안한다.
+
+    propose_structure()는 항상 template.allowed_paths()로 AI를 제약하지만, 이 함수는
+    allowed_folders=None으로 호출해 AI가 categories 자체를 새로 지어내게 한다. hint를
+    주면("부서별로 나눠줘" 등) 그 방향을 반영한다. 결과는 바로 템플릿이 되지 않으며,
+    사람이 검토한 뒤 templates.template_from_ai_proposal()로 템플릿을 만들어야 한다.
+    """
+    summarized = [
+        {"relative_path": e.relative_path, "ext": e.ext, "summary": e.summary or "(요약 없음)"}
+        for e in entries
+        if e.summary_status in ("ok", "empty")
+    ]
+    if not summarized:
+        return {
+            "categories": [],
+            "assignments": {},
+            "notes": "요약된 파일이 없어 AI에 보낼 수 없습니다. 먼저 파일을 요약한 뒤 다시 시도하세요.",
+        }
+    return llm_client.propose_folder_structure(
+        summarized, model=model, allowed_folders=None, user_hint=hint
+    )
+
+
 def classify_entries(
     entries: list[FileEntry],
     template: templates.OrgTemplate,
